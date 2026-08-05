@@ -1060,6 +1060,7 @@
   .status-reorder { background: var(--status-reorder-bg); color: var(--status-reorder); }
   .status-critical { background: var(--status-critical-bg); color: var(--status-critical); }
   .status-out { background: var(--status-out-bg); color: var(--status-out); }
+  .status-expedite { background: var(--gold-bg); color: var(--gold-border); }
   .status-ontrack { background: var(--status-ontrack-bg); color: var(--status-ontrack); }
   .status-delayed { background: var(--status-delayed-bg); color: var(--status-delayed); }
   .status-notstarted { background: var(--status-notstarted-bg); color: var(--status-notstarted); }
@@ -3121,6 +3122,20 @@
     color: var(--ink-mute);
     font-size: 12px;
     letter-spacing: 0.04em;
+  }
+  .wh-reorder-expedite-heading {
+    margin-top: 8px;
+    padding: 10px 8px 0;
+    border-top: 1px dashed var(--gold-border);
+    font-size: 11px; font-weight: 700;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--gold-border);
+  }
+  .wh-reorder-expedite-note {
+    padding: 0 8px 4px;
+    font-size: 11px;
+    color: var(--ink-mute);
+    line-height: 1.5;
   }
   .wh-reorder-row {
     display: grid;
@@ -6094,16 +6109,26 @@ function buildWarehouseReorderBannerHTML() {
     .sort((a, b) => order[a.status] - order[b.status] || a.daysImmediate - b.daysImmediate);
   const statusLabel = { healthy:'Healthy', reorder:'Reorder', critical:'Critical', out:'Out', pipeline:'In Pipeline' };
 
+  // A "critical" SKU whose TOTAL (stock + production) is already past the
+  // reorder threshold isn't actually short on units on order — it's a timing
+  // problem: the batch already in production just won't land before the
+  // shelf hits zero. That calls for expediting the existing PO, not placing
+  // a new one, so it gets pulled into its own bucket below instead of
+  // inflating the headline reorder count under a scary CRITICAL badge.
+  const isExpediteOnly = p => p.status === 'critical' && p.inProductionQty > 0 && p.daysTotal > REORDER_DAYS;
+
   // "In pipeline" SKUs already have enough incoming production to clear the
   // reorder threshold once it lands (see getCombinedWarehouseReorder) — they
   // don't need a NEW PO, just watching until the existing one arrives. Keep
   // them visible in the expandable list, but don't let them inflate the
   // headline "needs reorder" count/label, which should only reflect SKUs
   // that genuinely need a fresh order placed.
-  const needsReorder = attention.filter(p => p.status !== 'pipeline');
-  const pipelineOnly = attention.filter(p => p.status === 'pipeline');
+  const mainList     = attention.filter(p => !isExpediteOnly(p));
+  const needsReorder = mainList.filter(p => p.status !== 'pipeline');
+  const pipelineOnly = mainList.filter(p => p.status === 'pipeline');
+  const expediteOnly = attention.filter(isExpediteOnly);
 
-  const reorderRows = attention.map(p => `
+  const renderRow = (p, variant) => `
     <div class="wh-reorder-row">
       <div class="wh-reorder-row-photo">
         ${p.photo
@@ -6141,7 +6166,16 @@ function buildWarehouseReorderBannerHTML() {
           })()}
         ` : ''}
       </div>
-      ${p.status === 'pipeline' && p.soonestPromise && p.daysToArrival !== null ? (() => {
+      ${variant === 'expedite' ? (() => {
+        const hasPromise = p.daysToArrival !== null;
+        const relief    = hasPromise ? p.daysToArrival : (p.leadDays || DEFAULT_LEAD_DAYS);
+        const daysToArr = Math.max(0, Math.round(relief));
+        const oosDays   = Math.max(0, Math.round(relief - Math.max(0, p.daysImmediate)));
+        const deliveryIn = daysToArr === 0 ? 'today' : `in ${daysToArr}d`;
+        return `<span class="status status-expedite" style="display:block; white-space:normal; text-align:right; line-height:1.35;">
+          ${hasPromise ? 'Delivery' : '~Delivery'} ${deliveryIn}${oosDays > 0 ? `<br><span style="font-size:11px;">OOS ${oosDays}d before arrival</span>` : ''}
+        </span>`;
+      })() : p.status === 'pipeline' && p.soonestPromise && p.daysToArrival !== null ? (() => {
         const nextDate = p.soonestPromise instanceof Date ? p.soonestPromise : parseDate(p.soonestPromise);
         const daysToArr = Math.round(p.daysToArrival);
         const oosDays = Math.round(daysToArr - Math.max(0, p.daysImmediate));
@@ -6150,7 +6184,11 @@ function buildWarehouseReorderBannerHTML() {
           Delivery ${deliveryIn}${oosDays > 0 ? `<br><span style="font-size:11px;">OOS ${oosDays}d before arrival</span>` : ''}
         </span>`;
       })() : `<span class="status status-${p.status}">${statusLabel[p.status]}</span>`}
-    </div>`).join('');
+    </div>`;
+
+  const reorderRows  = mainList.map(p => renderRow(p, 'default')).join('');
+  const expediteRows = expediteOnly.map(p => renderRow(p, 'expedite')).join('');
+  const hasExpedite  = expediteOnly.length > 0;
 
   const hasReorder = needsReorder.length > 0;
   return `
@@ -6161,9 +6199,9 @@ function buildWarehouseReorderBannerHTML() {
         <span class="wh-reorder-banner-label">
           ${hasReorder
             ? (needsReorder.length === 1 ? 'product needs reorder' : 'products need reorder')
-            : (pipelineOnly.length > 0 ? 'no new reorders needed' : 'no reorders needed yet')}
+            : ((pipelineOnly.length > 0 || hasExpedite) ? 'no new reorders needed' : 'no reorders needed yet')}
         </span>
-        <span class="wh-reorder-banner-meta">combined BS + DayOne · ${combined.length} SKU${combined.length === 1 ? '' : 's'} tracked${pipelineOnly.length ? ` · ${pipelineOnly.length} already in production` : ''}</span>
+        <span class="wh-reorder-banner-meta">combined BS + DayOne · ${combined.length} SKU${combined.length === 1 ? '' : 's'} tracked${pipelineOnly.length ? ` · ${pipelineOnly.length} already in production` : ''}${hasExpedite ? ` · ${expediteOnly.length} need${expediteOnly.length === 1 ? 's' : ''} expediting` : ''}</span>
         <span class="wh-reorder-banner-chevron">
           <span class="chev-text-closed">Click to view</span>
           <span class="chev-text-open">Hide</span>
@@ -6171,7 +6209,12 @@ function buildWarehouseReorderBannerHTML() {
         </span>
       </summary>
       <div class="wh-reorder-banner-body">
-        ${attention.length > 0 ? reorderRows : `<div class="wh-reorder-empty">Every main product is above the ${REORDER_DAYS}-day cover threshold across both warehouses. Nothing to reorder right now.</div>`}
+        ${mainList.length > 0 ? reorderRows : (hasExpedite ? '' : `<div class="wh-reorder-empty">Every main product is above the ${REORDER_DAYS}-day cover threshold across both warehouses. Nothing to reorder right now.</div>`)}
+        ${hasExpedite ? `
+          <div class="wh-reorder-expedite-heading">⏱ Needs expediting before next delivery</div>
+          <div class="wh-reorder-expedite-note">Already enough production incoming to clear ${REORDER_DAYS} days of cover once it lands — no new order needed. But the current batch won't arrive before the shelf hits zero, so push the supplier to speed up delivery.</div>
+          ${expediteRows}
+        ` : ''}
       </div>
     </details>`;
 }
@@ -12961,6 +13004,21 @@ async function handlePOFileSelected(file) {
   const rec = findPayRecord(id);
   if (!rec) return;
 
+  // Sanity-check the filename against the slot it's being attached to —
+  // catches the easy mixup of manually dropping a Balance invoice into the
+  // Deposit slot (or vice versa) before it gets saved, rather than only
+  // catching it later when the amounts don't match what's on the PDF.
+  if (kind === 'invoice') {
+    const lname = file.name.toLowerCase();
+    const looksLikeLater  = /final|third|second|balance/.test(lname);
+    const looksLikeDeposit = /deposit|initial/.test(lname);
+    if (paymentIdx === 0 && looksLikeLater && !looksLikeDeposit) {
+      if (!confirm(`"${file.name}" looks like it might be a later payment invoice, not a Deposit invoice. Attach it to the Deposit slot anyway?`)) return;
+    } else if (paymentIdx > 0 && looksLikeDeposit && !looksLikeLater) {
+      if (!confirm(`"${file.name}" looks like it might be a Deposit invoice, not this instalment. Attach it here anyway?`)) return;
+    }
+  }
+
   const reader = new FileReader();
   reader.onload = async (ev) => {
     const dataUrl = ev.target.result;
@@ -13165,6 +13223,17 @@ function extractPONumberFromFilename(filename) {
   return m ? padPONumber(m[1]) : null;
 }
 
+// Some invoices cover more than one PO at once (e.g. "PO 08 and 09 Invoice
+// (Mascara and Expedited White Label).pdf"). Mass import still files the doc
+// under the first PO number found — but a second number immediately after
+// it (joined by "and"/"&"/"+"/"/") means the invoice content likely also
+// applies to that PO, and silently attaching it to only one order is exactly
+// the kind of "numbers don't match" mismatch this should flag instead.
+function extractSecondPONumberFromFilename(filename) {
+  const m = filename.match(/(?:purchase\s*order|po)\D{0,6}(\d{1,3})\s*(?:and|&|\+|\/)\s*(\d{1,3})/i);
+  return m ? padPONumber(m[2]) : null;
+}
+
 // Works out which of the 3 instalments an invoice filename belongs to.
 // Expects labels like "30% Initial Deposit", "30% Balance", "40% Balance" —
 // but falls back gracefully if the wording or percentages don't match
@@ -13203,10 +13272,27 @@ function detectInvoiceTarget(rec, filename) {
     if (best && bestDiff <= 5) return best;
   }
 
-  // Next: any existing invoice entry in the candidate column(s) with no file yet.
-  for (const idx of candidateIdxs) {
-    const empty = (rec.payments[idx].invoices || []).find(inv => !inv.docId);
-    if (empty) return { idx, invId: empty.id };
+  // Next: any existing invoice entry in the candidate column(s) with no file
+  // yet. When there's more than one fileless candidate across columns (e.g.
+  // no keyword pinned it to 2nd vs 3rd), prefer whichever one's expected
+  // amount is numerically closest to what the filename's percentage implies,
+  // instead of always grabbing column order [1, 2] regardless of fit —
+  // that's how a deposit-shaped file could end up in the wrong instalment.
+  const emptyCandidates = [];
+  candidateIdxs.forEach(idx => {
+    (rec.payments[idx].invoices || []).forEach(inv => {
+      if (!inv.docId) emptyCandidates.push({ idx, invId: inv.id, amount: inv.amount });
+    });
+  });
+  if (emptyCandidates.length) {
+    if (pct != null && rec.totalAmount) {
+      emptyCandidates.sort((a, b) => {
+        const da = a.amount != null ? Math.abs((a.amount / rec.totalAmount * 100) - pct) : Infinity;
+        const db = b.amount != null ? Math.abs((b.amount / rec.totalAmount * 100) - pct) : Infinity;
+        return da - db;
+      });
+    }
+    return { idx: emptyCandidates[0].idx, invId: emptyCandidates[0].invId };
   }
 
   // Every existing entry is already filled — this is a new balance invoice
@@ -13225,7 +13311,7 @@ async function handleMassImportFiles(files) {
   if (!files || files.length === 0) return;
   if (typeof JSZip === 'undefined') { alert("ZIP support isn't loaded yet — please wait a moment and try again."); return; }
 
-  let poCount = 0, invCount = 0, skipped = 0, unmatched = 0, alreadyEmbedded = 0;
+  let poCount = 0, invCount = 0, skipped = 0, unmatched = 0, alreadyEmbedded = 0, conflicts = 0, multiPO = 0;
   const poNumsTouched = new Set();
 
   for (const file of files) {
@@ -13249,7 +13335,15 @@ async function handleMassImportFiles(files) {
       const rec = findOrCreatePayRecord(poNumber);
       if (!rec) { skipped++; continue; }
 
-      const category = /invoice/i.test(base) ? 'invoice' : 'po';
+      const secondPO = extractSecondPONumberFromFilename(base);
+      if (secondPO) multiPO++;
+
+      // Some invoices never actually contain the word "invoice" (e.g. "PO 16
+      // (EU 30% Initial Deposit).pdf") — catch those via the instalment
+      // keywords too, so they don't get miscategorised as the PO document
+      // itself (which then also blocks the deposit/balance slot from ever
+      // getting filled correctly).
+      const category = /invoice|deposit|initial|balance|instal{1,2}ment/i.test(base) ? 'invoice' : 'po';
       const target = category === 'invoice' ? detectInvoiceTarget(rec, base) : null;
 
       // Store as a genuine document — always the active file for this PO,
@@ -13263,16 +13357,25 @@ async function handleMassImportFiles(files) {
         category,
         type: 'pdf',
         linkedPO: poNumber,
-        notes: '',
+        notes: secondPO ? `⚠ Filename also references ${secondPO} — verify which PO(s) this invoice actually covers.` : '',
         dataUrl,
         uploadedAt: new Date().toISOString()
       };
       if (!state.documents) state.documents = [];
       state.documents.unshift(doc);
+      // A re-import that overlaps a previous one (same zip run twice, or two
+      // zips with shared files) shouldn't silently clobber a slot that's
+      // already correctly filled by a DIFFERENT file — that's exactly how
+      // a deposit slot ends up holding a balance invoice. Only re-link a
+      // slot if it's empty or the file already there has the same name.
       if (category === 'po') {
-        rec.poDocId = doc.id; poCount++;
+        const existing = rec.poDocId ? findDocById(rec.poDocId) : null;
+        if (existing && existing.name !== base) { conflicts++; }
+        else { rec.poDocId = doc.id; poCount++; }
       } else if (target.idx === 0) {
-        rec.payments[0].invoiceDocId = doc.id; invCount++;
+        const existing = rec.payments[0].invoiceDocId ? findDocById(rec.payments[0].invoiceDocId) : null;
+        if (existing && existing.name !== base) { conflicts++; }
+        else { rec.payments[0].invoiceDocId = doc.id; invCount++; }
       } else {
         const inv = findPayInvoice(rec, target.idx, target.invId);
         if (inv) inv.docId = doc.id;
@@ -13302,6 +13405,8 @@ async function handleMassImportFiles(files) {
   if (alreadyEmbedded) parts.push(`${alreadyEmbedded} already built in (skipped duplicate storage)`);
   if (skipped) parts.push(`${skipped} skipped (excluded)`);
   if (unmatched) parts.push(`${unmatched} unmatched filename${unmatched===1?'':'s'}`);
+  if (conflicts) parts.push(`⚠ ${conflicts} slot conflict${conflicts===1?'':'s'} (kept existing file — review in Documents)`);
+  if (multiPO) parts.push(`⚠ ${multiPO} filename${multiPO===1?'':'s'} referenced more than one PO — flagged for review`);
   toast(`Mass import complete · ${parts.join(' · ')}`);
 }
 
@@ -14476,14 +14581,27 @@ loadState().then(() => setView('warehouse'));
    ============================================================ */
 async function exportReorderReport() {
   const combined = getCombinedWarehouseReorder();
+  // A "critical" SKU whose TOTAL (stock + production) is already past the
+  // reorder threshold isn't actually short on units on order — it's a timing
+  // problem: the batch already in production just won't land before the
+  // shelf hits zero. That calls for expediting the existing PO, not placing
+  // a new one, so it's pulled into its own table below instead of inflating
+  // the main reorder list under a CRITICAL label (same rule as the
+  // warehouse reorder banner).
+  const isExpediteOnly = p => p.status === 'critical' && p.inProductionQty > 0 && p.daysTotal > REORDER_DAYS;
+
   // Only SKUs that genuinely need a fresh order — 'pipeline' SKUs already have
   // enough incoming production to clear the reorder threshold once it lands,
-  // so they're excluded here (same rule as the warehouse reorder banner).
+  // so they're excluded here too (same rule as the warehouse reorder banner).
   const needsReorder = combined
-    .filter(p => p.status === 'out' || p.status === 'critical' || p.status === 'reorder')
+    .filter(p => (p.status === 'out' || p.status === 'critical' || p.status === 'reorder') && !isExpediteOnly(p))
     .sort((a, b) => a.daysImmediate - b.daysImmediate);
 
-  if (needsReorder.length === 0) {
+  const expediteOnly = combined
+    .filter(isExpediteOnly)
+    .sort((a, b) => a.daysImmediate - b.daysImmediate);
+
+  if (needsReorder.length === 0 && expediteOnly.length === 0) {
     toast('No products need reordering right now — all clear!');
     return;
   }
@@ -14561,15 +14679,17 @@ async function exportReorderReport() {
     )).join('')}
   </w:tr>`;
 
-  const dataRowsXml = needsReorder.map((p, idx) => {
+  const buildDataRow = (p, idx, opts = {}) => {
     const bg            = idx % 2 === 0 ? 'FFFFFF' : 'F7F3FA';
     const daysText      = isFinite(p.daysImmediate) ? `${Math.round(p.daysImmediate)} days` : 'N/A';
     const daysTotalText = isFinite(p.daysTotal)     ? `${Math.round(p.daysTotal)} days`     : 'N/A';
     const adsText       = p.adsN > 0 ? p.adsN.toFixed(1) : '-';
     const stockText     = String(p.stock ?? 0);
     const prodQtyText   = String(p.inProductionQty ?? 0);
-    const sc            = statusColors[p.status] || '4A4A4A';
-    const sl            = statusLabels[p.status] || p.status.toUpperCase();
+    // Expedite-only rows are internally still 'critical', but total stock is
+    // already fine — label them distinctly instead of the scary CRITICAL tag.
+    const sc            = opts.expedite ? 'B8901E' : (statusColors[p.status] || '4A4A4A');
+    const sl            = opts.expedite ? 'EXPEDITE' : (statusLabels[p.status] || p.status.toUpperCase());
 
     const nameCell = cell(
       para(run(p.name || p.sku, { bold: true, size: 19, color: '1C1C1C', font: 'Arial' }), { spacing: { before: 0, after: 20 } }) +
@@ -14616,7 +14736,10 @@ async function exportReorderReport() {
     );
 
     return `<w:tr>${nameCell}${statusCell}${mc(stockText,750)}${mc(prodQtyText,900)}${mc(adsText,550)}${mc(daysText,850)}${mc(daysTotalText,1050)}${prodStatusCell}${remarksCell}</w:tr>`;
-  }).join('');
+  };
+
+  const dataRowsXml     = needsReorder.map((p, idx) => buildDataRow(p, idx)).join('');
+  const expediteRowsXml = expediteOnly.map((p, idx) => buildDataRow(p, idx, { expedite: true })).join('');
 
   const summaryParts = [
     outCount      > 0 ? `${outCount} Out of Stock`     : '',
@@ -14626,6 +14749,9 @@ async function exportReorderReport() {
 
   const pipelineNote = pipelineCount > 0
     ? `${pipelineCount} additional SKU${pipelineCount !== 1 ? 's' : ''} already ${pipelineCount !== 1 ? 'have' : 'has'} production in the pipeline covering ${pipelineCount !== 1 ? 'them' : 'it'} past the ${REORDER_DAYS}-day threshold — not listed below.`
+    : '';
+  const expediteNote = expediteOnly.length > 0
+    ? `${expediteOnly.length} SKU${expediteOnly.length !== 1 ? 's' : ''} already ${expediteOnly.length !== 1 ? 'have' : 'has'} enough production incoming to clear the ${REORDER_DAYS}-day threshold — no new order needed, just expediting (see the table below).`
     : '';
 
   const docXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -14663,9 +14789,13 @@ async function exportReorderReport() {
 
   ${para(run('Facelove · Reorder Report', { bold: true, size: 36, color: '1C1C1C', font: 'Arial' }), { spacing: { before: 0, after: 80 } })}
   ${para(run(`Generated: ${today}`, { size: 19, color: '8A8A8A', font: 'Arial' }), { spacing: { before: 0, after: 60 } })}
-  ${para(run(`${needsReorder.length} product${needsReorder.length !== 1 ? 's' : ''} require attention  ·  ${summaryParts}`, { size: 19, color: '4A4A4A', font: 'Arial' }), { spacing: { before: 0, after: pipelineNote ? 40 : 320 } })}
-  ${pipelineNote ? para(run(pipelineNote, { size: 17, color: '5E7A93', font: 'Arial' }), { spacing: { before: 0, after: 320 } }) : ''}
+  ${needsReorder.length > 0
+      ? para(run(`${needsReorder.length} product${needsReorder.length !== 1 ? 's' : ''} require attention  ·  ${summaryParts}`, { size: 19, color: '4A4A4A', font: 'Arial' }), { spacing: { before: 0, after: (pipelineNote || expediteNote) ? 40 : 320 } })
+      : para(run(`No new orders needed right now${expediteOnly.length > 0 ? ' — see expediting needed below' : ''}`, { size: 19, color: '4A4A4A', font: 'Arial' }), { spacing: { before: 0, after: (pipelineNote || expediteNote) ? 40 : 320 } })}
+  ${pipelineNote ? para(run(pipelineNote, { size: 17, color: '5E7A93', font: 'Arial' }), { spacing: { before: 0, after: expediteNote ? 20 : 320 } }) : ''}
+  ${expediteNote ? para(run(expediteNote, { size: 17, color: 'B8901E', font: 'Arial' }), { spacing: { before: 0, after: 320 } }) : ''}
 
+  ${needsReorder.length > 0 ? `
   <w:tbl>
     <w:tblPr>
       <w:tblW w:w="10080" w:type="dxa"/>
@@ -14686,6 +14816,32 @@ async function exportReorderReport() {
     ${headerRowXml}
     ${dataRowsXml}
   </w:tbl>
+  ` : ''}
+
+  ${expediteOnly.length > 0 ? `
+  ${para(run('⏱ Needs Expediting Before Next Delivery', { bold: true, size: 26, color: 'B8901E', font: 'Arial' }), { spacing: { before: needsReorder.length > 0 ? 300 : 0, after: 60 } })}
+  ${para(run(`Already enough production incoming to clear the ${REORDER_DAYS}-day threshold once it lands — no new order needed. But the current batch won't arrive before the shelf hits zero, so push the supplier to speed up delivery.`, { size: 17, color: '8A8A8A', font: 'Arial' }), { spacing: { before: 0, after: 200 } })}
+  <w:tbl>
+    <w:tblPr>
+      <w:tblW w:w="10080" w:type="dxa"/>
+      ${tblBorder}
+      <w:tblLook w:val="04A0" w:firstRow="1" w:lastRow="0" w:firstColumn="0" w:lastColumn="0" w:noHBand="0" w:noVBand="1"/>
+    </w:tblPr>
+    <w:tblGrid>
+      <w:gridCol w:w="2000"/>
+      <w:gridCol w:w="900"/>
+      <w:gridCol w:w="750"/>
+      <w:gridCol w:w="900"/>
+      <w:gridCol w:w="550"/>
+      <w:gridCol w:w="850"/>
+      <w:gridCol w:w="1050"/>
+      <w:gridCol w:w="1800"/>
+      <w:gridCol w:w="1280"/>
+    </w:tblGrid>
+    ${headerRowXml}
+    ${expediteRowsXml}
+  </w:tbl>
+  ` : ''}
 
   ${para(run(''), { spacing: { before: 400, after: 0 } })}
   ${para(run('Notes', { bold: true, size: 24, color: '4A4A4A', font: 'Arial' }), { spacing: { before: 0, after: 80 } })}
@@ -14734,7 +14890,7 @@ async function exportReorderReport() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    toast(`Reorder report downloaded · ${needsReorder.length} product${needsReorder.length !== 1 ? 's' : ''}`);
+    toast(`Reorder report downloaded · ${needsReorder.length} product${needsReorder.length !== 1 ? 's' : ''}${expediteOnly.length > 0 ? ` · ${expediteOnly.length} to expedite` : ''}`);
   } catch (err) {
     console.error('Reorder report error:', err);
     toast('Error generating report — check the console for details.');
@@ -14743,14 +14899,27 @@ async function exportReorderReport() {
 
 async function exportReorderReportAmazon() {
   const combined = getCombinedWarehouseReorderAmazon();
+  // A "critical" SKU whose TOTAL (stock + production) is already past the
+  // reorder threshold isn't actually short on units on order — it's a timing
+  // problem: the batch already in production just won't land before the
+  // shelf hits zero. That calls for expediting the existing PO, not placing
+  // a new one, so it's pulled into its own table below instead of inflating
+  // the main reorder list under a CRITICAL label (same rule as the
+  // warehouse reorder banner).
+  const isExpediteOnly = p => p.status === 'critical' && p.inProductionQty > 0 && p.daysTotal > REORDER_DAYS;
+
   // Only SKUs that genuinely need a fresh order — 'pipeline' SKUs already have
   // enough incoming production to clear the reorder threshold once it lands,
-  // so they're excluded here (same rule as the warehouse reorder banner).
+  // so they're excluded here too (same rule as the warehouse reorder banner).
   const needsReorder = combined
-    .filter(p => p.status === 'out' || p.status === 'critical' || p.status === 'reorder')
+    .filter(p => (p.status === 'out' || p.status === 'critical' || p.status === 'reorder') && !isExpediteOnly(p))
     .sort((a, b) => a.daysImmediate - b.daysImmediate);
 
-  if (needsReorder.length === 0) {
+  const expediteOnly = combined
+    .filter(isExpediteOnly)
+    .sort((a, b) => a.daysImmediate - b.daysImmediate);
+
+  if (needsReorder.length === 0 && expediteOnly.length === 0) {
     toast('No products need reordering right now (even with the Amazon projection) — all clear!');
     return;
   }
@@ -14828,15 +14997,17 @@ async function exportReorderReportAmazon() {
     )).join('')}
   </w:tr>`;
 
-  const dataRowsXml = needsReorder.map((p, idx) => {
+  const buildDataRow = (p, idx, opts = {}) => {
     const bg            = idx % 2 === 0 ? 'FFFFFF' : 'F7F3FA';
     const daysText      = isFinite(p.daysImmediate) ? `${Math.round(p.daysImmediate)} days` : 'N/A';
     const daysTotalText = isFinite(p.daysTotal)     ? `${Math.round(p.daysTotal)} days`     : 'N/A';
     const adsText       = p.adsN > 0 ? p.adsN.toFixed(1) : '-';
     const stockText     = String(p.stock ?? 0);
     const prodQtyText   = String(p.inProductionQty ?? 0);
-    const sc            = statusColors[p.status] || '4A4A4A';
-    const sl            = statusLabels[p.status] || p.status.toUpperCase();
+    // Expedite-only rows are internally still 'critical', but total stock is
+    // already fine — label them distinctly instead of the scary CRITICAL tag.
+    const sc            = opts.expedite ? 'B8901E' : (statusColors[p.status] || '4A4A4A');
+    const sl            = opts.expedite ? 'EXPEDITE' : (statusLabels[p.status] || p.status.toUpperCase());
 
     const nameCell = cell(
       para(run(p.name || p.sku, { bold: true, size: 19, color: '1C1C1C', font: 'Arial' }), { spacing: { before: 0, after: 20 } }) +
@@ -14883,7 +15054,10 @@ async function exportReorderReportAmazon() {
     );
 
     return `<w:tr>${nameCell}${statusCell}${mc(stockText,750)}${mc(prodQtyText,900)}${mc(adsText,550)}${mc(daysText,850)}${mc(daysTotalText,1050)}${prodStatusCell}${remarksCell}</w:tr>`;
-  }).join('');
+  };
+
+  const dataRowsXml     = needsReorder.map((p, idx) => buildDataRow(p, idx)).join('');
+  const expediteRowsXml = expediteOnly.map((p, idx) => buildDataRow(p, idx, { expedite: true })).join('');
 
   const summaryParts = [
     outCount      > 0 ? `${outCount} Out of Stock`     : '',
@@ -14893,6 +15067,9 @@ async function exportReorderReportAmazon() {
 
   const pipelineNote = pipelineCount > 0
     ? `${pipelineCount} additional SKU${pipelineCount !== 1 ? 's' : ''} already ${pipelineCount !== 1 ? 'have' : 'has'} production in the pipeline covering ${pipelineCount !== 1 ? 'them' : 'it'} past the ${REORDER_DAYS}-day threshold — not listed below.`
+    : '';
+  const expediteNote = expediteOnly.length > 0
+    ? `${expediteOnly.length} SKU${expediteOnly.length !== 1 ? 's' : ''} already ${expediteOnly.length !== 1 ? 'have' : 'has'} enough production incoming to clear the ${REORDER_DAYS}-day threshold — no new order needed, just expediting (see the table below).`
     : '';
 
   const docXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -14930,9 +15107,13 @@ async function exportReorderReportAmazon() {
 
   ${para(run('Facelove · Reorder Report (incl. Amazon Projection)', { bold: true, size: 36, color: '1C1C1C', font: 'Arial' }), { spacing: { before: 0, after: 80 } })}
   ${para(run(`Generated: ${today}`, { size: 19, color: '8A8A8A', font: 'Arial' }), { spacing: { before: 0, after: 60 } })}
-  ${para(run(`${needsReorder.length} product${needsReorder.length !== 1 ? 's' : ''} require attention  ·  ${summaryParts}`, { size: 19, color: '4A4A4A', font: 'Arial' }), { spacing: { before: 0, after: pipelineNote ? 40 : 320 } })}
-  ${pipelineNote ? para(run(pipelineNote, { size: 17, color: '5E7A93', font: 'Arial' }), { spacing: { before: 0, after: 320 } }) : ''}
+  ${needsReorder.length > 0
+      ? para(run(`${needsReorder.length} product${needsReorder.length !== 1 ? 's' : ''} require attention  ·  ${summaryParts}`, { size: 19, color: '4A4A4A', font: 'Arial' }), { spacing: { before: 0, after: (pipelineNote || expediteNote) ? 40 : 320 } })
+      : para(run(`No new orders needed right now${expediteOnly.length > 0 ? ' — see expediting needed below' : ''}`, { size: 19, color: '4A4A4A', font: 'Arial' }), { spacing: { before: 0, after: (pipelineNote || expediteNote) ? 40 : 320 } })}
+  ${pipelineNote ? para(run(pipelineNote, { size: 17, color: '5E7A93', font: 'Arial' }), { spacing: { before: 0, after: expediteNote ? 20 : 320 } }) : ''}
+  ${expediteNote ? para(run(expediteNote, { size: 17, color: 'B8901E', font: 'Arial' }), { spacing: { before: 0, after: 320 } }) : ''}
 
+  ${needsReorder.length > 0 ? `
   <w:tbl>
     <w:tblPr>
       <w:tblW w:w="10080" w:type="dxa"/>
@@ -14953,6 +15134,32 @@ async function exportReorderReportAmazon() {
     ${headerRowXml}
     ${dataRowsXml}
   </w:tbl>
+  ` : ''}
+
+  ${expediteOnly.length > 0 ? `
+  ${para(run('⏱ Needs Expediting Before Next Delivery', { bold: true, size: 26, color: 'B8901E', font: 'Arial' }), { spacing: { before: needsReorder.length > 0 ? 300 : 0, after: 60 } })}
+  ${para(run(`Already enough production incoming to clear the ${REORDER_DAYS}-day threshold once it lands — no new order needed. But the current batch won't arrive before the shelf hits zero, so push the supplier to speed up delivery.`, { size: 17, color: '8A8A8A', font: 'Arial' }), { spacing: { before: 0, after: 200 } })}
+  <w:tbl>
+    <w:tblPr>
+      <w:tblW w:w="10080" w:type="dxa"/>
+      ${tblBorder}
+      <w:tblLook w:val="04A0" w:firstRow="1" w:lastRow="0" w:firstColumn="0" w:lastColumn="0" w:noHBand="0" w:noVBand="1"/>
+    </w:tblPr>
+    <w:tblGrid>
+      <w:gridCol w:w="2000"/>
+      <w:gridCol w:w="900"/>
+      <w:gridCol w:w="750"/>
+      <w:gridCol w:w="900"/>
+      <w:gridCol w:w="550"/>
+      <w:gridCol w:w="850"/>
+      <w:gridCol w:w="1050"/>
+      <w:gridCol w:w="1800"/>
+      <w:gridCol w:w="1280"/>
+    </w:tblGrid>
+    ${headerRowXml}
+    ${expediteRowsXml}
+  </w:tbl>
+  ` : ''}
 
   ${para(run(''), { spacing: { before: 400, after: 0 } })}
   ${para(run('Notes', { bold: true, size: 24, color: '4A4A4A', font: 'Arial' }), { spacing: { before: 0, after: 80 } })}
@@ -14997,7 +15204,7 @@ async function exportReorderReportAmazon() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    toast(`Reorder report (incl. Amazon) downloaded · ${needsReorder.length} product${needsReorder.length !== 1 ? 's' : ''}`);
+    toast(`Reorder report (incl. Amazon) downloaded · ${needsReorder.length} product${needsReorder.length !== 1 ? 's' : ''}${expediteOnly.length > 0 ? ` · ${expediteOnly.length} to expedite` : ''}`);
   } catch (err) {
     console.error('Reorder report (Amazon) error:', err);
     toast('Error generating report — check the console for details.');
