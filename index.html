@@ -3881,11 +3881,7 @@
     <button class="nav-item" data-view="sales"><span class="nav-emoji">📈</span> Avg Daily Sales <span class="nav-count" id="nav-count-sales">0</span></button>
     <button class="nav-item" data-view="salesAmazon"><span class="nav-emoji">📦</span> Avg Daily Sales (incl. Amazon)</button>
     <button class="nav-item" data-view="production"><span class="nav-emoji">🏭</span> Current Production <span class="nav-count" id="nav-count-prod">0</span></button>
-    <button class="nav-item" data-view="growthProjection"><span class="nav-emoji">🚀</span> Growth Projection</button>
-    <button class="nav-item" data-view="productDetails"><span class="nav-emoji">🧴</span> Product Details <span class="nav-count" id="nav-count-pdet">0</span></button>
-    <button class="nav-item" data-view="suppliers"><span class="nav-emoji">🤝</span> Suppliers <span class="nav-count" id="nav-count-sup">0</span></button>
     <button class="nav-item" data-view="documents"><span class="nav-emoji">📁</span> POs &amp; Invoices <span class="nav-count" id="nav-count-docs">0</span></button>
-    <button class="nav-item" data-view="productDev"><span class="nav-emoji">🔬</span> Product Dev</button>
   </nav>
 </header>
 <div id="wh-reorder-banner-host" style="display:none;"></div>
@@ -3902,10 +3898,6 @@
 <nav class="sub-nav" id="sub-nav" style="display:none;">
   <button class="sub-nav-item" data-subview="inProduction"><span class="sub-nav-emoji">⏳</span> In Production <span id="sub-count-ip">0</span></button>
   <button class="sub-nav-item" data-subview="completedProduction"><span class="sub-nav-emoji">✅</span> Completed Production <span id="sub-count-cp">0</span></button>
-</nav>
-<nav class="sub-nav" id="sub-nav-pd" style="display:none;">
-  <button class="sub-nav-item" data-subview="newProductPlanning"><span class="sub-nav-emoji">🌱</span> New Product Planning <span id="sub-count-npp">0</span></button>
-  <button class="sub-nav-item" data-subview="productImprovement"><span class="sub-nav-emoji">🔧</span> Current Product Improvement <span id="sub-count-pi">0</span></button>
 </nav>
 <!-- Payment Tracker's 5 sub-tabs render inline (via renderPaymentTrackerSubTabs)
      directly above the table inside the page content, not as a fixed nav bar,
@@ -5242,7 +5234,11 @@ function getProductRollup() {
 /* ---------- Routing ---------- */
 function setView(view) {
   if (view === 'production') view = 'inProduction';
-  if (view === 'productDev') view = 'newProductPlanning';
+  // Growth Projection, Product Details, Suppliers, and Product Dev were
+  // removed as tabs (and their data deleted) — redirect any old bookmark or
+  // saved view state to a view that still exists instead of rendering blank.
+  if (view === 'growthProjection' || view === 'productDetails' || view === 'suppliers'
+    || view === 'productDev' || view === 'newProductPlanning' || view === 'productImprovement') view = 'inventoryDayOne';
   if (view === 'warehouse')  view = 'inventoryDayOne';
   if (view === 'paymentSchedule') view = 'usInvoices';
   // Legacy BS shortcut — BS is retired; redirect to DayOne so old bookmarks
@@ -5266,20 +5262,16 @@ function setView(view) {
   if (view !== 'dashboard' && dashboardEditActive) dashboardEditActive = false;
   currentView = view;
   const subNav   = document.getElementById('sub-nav');
-  const subNavPD = document.getElementById('sub-nav-pd');
   const subNavWH = document.getElementById('sub-nav-wh');
   const isProd = (view === 'inProduction' || view === 'completedProduction');
-  const isPD   = (view === 'newProductPlanning' || view === 'productImprovement');
   const isWH   = (view === 'inventoryBS' || view === 'inventoryDayOne' || view === 'phasedOutWH' || view === 'toShipAmazon' || view === 'shippedOutAmazon');
   const isPay  = (view === 'usInvoices' || view === 'euInvoices' || view === 'complianceInvoices' || view === 'inspectionInvoices' || view === 'sampleProductionInvoices'
     || view === 'usInvoicesArchive' || view === 'euInvoicesArchive' || view === 'complianceInvoicesArchive' || view === 'inspectionInvoicesArchive' || view === 'sampleProductionInvoicesArchive');
   subNav.style.display   = isProd ? 'flex' : 'none';
-  subNavPD.style.display = isPD   ? 'flex' : 'none';
   subNavWH.style.display = isWH   ? 'flex' : 'none';
   document.querySelectorAll('.nav-item').forEach(b => {
     let isActive = b.dataset.view === view;
     if (b.dataset.view === 'production' && isProd) isActive = true;
-    if (b.dataset.view === 'productDev' && isPD)   isActive = true;
     if (b.dataset.view === 'warehouse'  && isWH)   isActive = true;
     if (b.dataset.view === 'paymentSchedule' && isPay) isActive = true;
     b.classList.toggle('active', isActive);
@@ -5298,17 +5290,12 @@ function render() {
   else if (currentView === 'salesAmazon')         main.innerHTML = renderSalesAmazon();
   else if (currentView === 'inProduction')        main.innerHTML = renderInProduction();
   else if (currentView === 'completedProduction') main.innerHTML = renderCompletedProduction();
-  else if (currentView === 'suppliers')           main.innerHTML = renderSuppliers();
   else if (currentView === 'documents')           main.innerHTML = renderDocuments();
-  else if (currentView === 'newProductPlanning')  main.innerHTML = renderNewProductPlanning();
-  else if (currentView === 'productImprovement')  main.innerHTML = renderProductImprovement();
   else if (currentView === 'inventoryBS')         main.innerHTML = renderWarehouseInventory('bs');
   else if (currentView === 'inventoryDayOne')     main.innerHTML = renderWarehouseInventory('dayone');
   else if (currentView === 'phasedOutWH')         main.innerHTML = renderPhasedOutWarehouse();
   else if (currentView === 'toShipAmazon')        main.innerHTML = renderToShipAmazon();
   else if (currentView === 'shippedOutAmazon')     main.innerHTML = renderShippedOutAmazon();
-  else if (currentView === 'growthProjection')    main.innerHTML = renderGrowthProjection();
-  else if (currentView === 'productDetails')      main.innerHTML = renderProductDetails();
   else if (currentView === 'usInvoices')          main.innerHTML = renderPaymentScheduleByEntity('US');
   else if (currentView === 'euInvoices')           main.innerHTML = renderPaymentScheduleByEntity('EU');
   else if (currentView === 'complianceInvoices')   main.innerHTML = renderOneTimeInvoices('compliance');
@@ -5335,14 +5322,10 @@ function render() {
 function updateNavCounts() {
   document.getElementById('nav-count-sales').textContent = state.sales.length;
   document.getElementById('nav-count-prod').textContent  = state.inProduction.length;
-  document.getElementById('nav-count-sup').textContent   = state.suppliers.length;
   document.getElementById('nav-count-docs').textContent  = (state.documents||[]).length;
-  document.getElementById('nav-count-pdet').textContent  = (state.productDetails||[]).length;
   document.getElementById('nav-count-pay').textContent   = (state.paymentSchedule||[]).length + (state.oneTimeInvoices||[]).length;
   document.getElementById('sub-count-ip').textContent    = `(${state.inProduction.length})`;
   document.getElementById('sub-count-cp').textContent    = `(${state.completedProduction.length})`;
-  document.getElementById('sub-count-npp').textContent   = `(${(state.newProductPlanning||[]).length})`;
-  document.getElementById('sub-count-pi').textContent    = `(${(state.productImprovement||[]).length})`;
   const wh = state.warehouseInventory || {};
   const sectionCount = (whouse) => {
     const w = wh[whouse] || {};
@@ -9949,6 +9932,32 @@ function findPOAnywhere(id) {
   return state.inProduction.find(p => p.id === id) || state.completedProduction.find(p => p.id === id);
 }
 
+// Looks up (or creates) the Current Production card for a PO number — used
+// by mass import so a fresh PO contract auto-creates its production entry
+// instead of leaving the user to build it by hand. Never touches a PO that's
+// already in Completed Production (that one's done; a new contract file for
+// the same number is almost certainly a re-upload, not new work).
+function findOrCreateProductionPO(poNumber) {
+  if (!state.inProduction) state.inProduction = [];
+  if (!state.completedProduction) state.completedProduction = [];
+  const key = normalizePONumber(poNumber);
+  const inCompleted = state.completedProduction.find(p => normalizePONumber(p.poNumber) === key);
+  if (inCompleted) return { po: inCompleted, isNew: false, inCompleted: true };
+  let po = state.inProduction.find(p => normalizePONumber(p.poNumber) === key);
+  if (po) return { po, isNew: false, inCompleted: false };
+  po = {
+    id: uid('po_'),
+    poNumber: poNumber || '',
+    supplier: 'GZ Hongshun Biotech',
+    productionStart: '', promiseDate: '', actualProductionEndDate: '',
+    productionStatus: 'ontrack',
+    currency: 'RMB', remarks: '',
+    lineItems: []
+  };
+  state.inProduction.unshift(po);
+  return { po, isNew: true, inCompleted: false };
+}
+
 function addPO(target = 'inProduction') {
   const newPO = {
     id: uid('po_'),
@@ -13120,6 +13129,41 @@ async function extractTextFromPDFDataUrl(dataUrl) {
 // Heuristic extraction — manufacturer PDFs pack words together with no
 // spaces, so these regexes tolerate zero-or-more whitespace between tokens.
 // Fields are only ever used to fill BLANK values; nothing is auto-overwritten.
+// Reads the "X calendar days ... Y calendar days for other styles" lead-time
+// sentence common to Hongshun POs/invoices. Returns { default, brush } — most
+// contracts quote a longer lead time for foundation brushes and a shorter one
+// for everything else; when only one figure is present both come back equal.
+function parseLeadTimesFromText(flat) {
+  const re = /([\w\s]{0,40}?)(\d{1,3})\s*calendar\s*days/gi;
+  let m, dflt = null, brush = null;
+  while ((m = re.exec(flat)) !== null) {
+    const days = +m[2];
+    if (/brush/i.test(m[1])) brush = days;
+    else if (dflt == null) dflt = days;
+  }
+  if (dflt == null) dflt = brush;
+  if (brush == null) brush = dflt;
+  return { default: dflt, brush };
+}
+
+// Manufacturer PDFs here sign off with a "D-MMM-YY" date (e.g. "5-Aug-26")
+// rather than the "Month DD, YYYY" style — tried second since it's specific
+// to this template and less likely to false-positive on other text.
+function parseFlexibleDate(flat) {
+  const long = flat.match(/([A-Z][a-z]+)\s*(\d{1,2}),?\s*(\d{4})/);
+  if (long) {
+    const d = new Date(`${long[1]} ${long[2]}, ${long[3]}`);
+    if (!isNaN(d)) return d.toISOString().slice(0, 10);
+  }
+  const short = flat.match(/\b(\d{1,2})-([A-Za-z]{3})-(\d{2,4})\b/);
+  if (short) {
+    const yr = short[3].length === 2 ? '20' + short[3] : short[3];
+    const d = new Date(`${short[2]} ${short[1]}, ${yr}`);
+    if (!isNaN(d)) return d.toISOString().slice(0, 10);
+  }
+  return null;
+}
+
 function parsePOFieldsFromText(text, filename) {
   const out = {};
   const flat = text.replace(/\s+/g, ' ');
@@ -13130,11 +13174,11 @@ function parsePOFieldsFromText(text, filename) {
   out.currency = 'RMB';
   const terms = flat.match(/Total\s*amount\s*is[\s\S]{0,220}?deliver\.?/i);
   if (terms) out.paymentTerms = terms[0].replace(/^Total\s*amount\s*is\s*[\d,.]+\s*RMB\s*and\s*/i, '').trim();
-  const dateMatch = flat.match(/([A-Z][a-z]+)\s*(\d{1,2}),?\s*(\d{4})/);
-  if (dateMatch) {
-    const d = new Date(`${dateMatch[1]} ${dateMatch[2]}, ${dateMatch[3]}`);
-    if (!isNaN(d)) out.orderDate = d.toISOString().slice(0,10);
-  }
+  const orderDate = parseFlexibleDate(flat);
+  if (orderDate) out.orderDate = orderDate;
+  const leads = parseLeadTimesFromText(flat);
+  if (leads.default != null) out.leadDaysDefault = leads.default;
+  if (leads.brush != null) out.leadDaysBrush = leads.brush;
   return out;
 }
 
@@ -13159,11 +13203,8 @@ function parseInvoiceFieldsFromText(text, filename) {
   const cnyMatches = [...flat.matchAll(/([\d,]+(?:\.\d+)?)\s*CNY/gi)];
   let bestCny = cnyMatches.find(m => /%/.test(flat.slice(Math.max(0, m.index - 60), m.index))) || cnyMatches[0];
   if (bestCny) out.invoiceAmount = +bestCny[1].replace(/,/g, '');
-  const dateMatch = flat.match(/([A-Z][a-z]+)\s+(\d{1,2}),?\s*(\d{4})/);
-  if (dateMatch) {
-    const d = new Date(`${dateMatch[1]} ${dateMatch[2]}, ${dateMatch[3]}`);
-    if (!isNaN(d)) out.invoiceDate = d.toISOString().slice(0, 10);
-  }
+  const invoiceDate = parseFlexibleDate(flat);
+  if (invoiceDate) out.invoiceDate = invoiceDate;
   return out;
 }
 
@@ -13307,11 +13348,20 @@ function triggerMassImport() {
   document.getElementById('pos-mass-input').click();
 }
 
+// Finds an existing Documents entry that's clearly the SAME logical file as
+// this import (same name + same PO + same category) so a re-import updates
+// it in place instead of piling up an endless stack of duplicates — that
+// stacking is exactly what bloated the POs & Invoices tab to hundreds of
+// files after repeated mass imports of overlapping zips.
+function findExistingDocForImport(name, poNumber, category) {
+  return (state.documents || []).find(d => d.name === name && d.linkedPO === poNumber && d.category === category);
+}
+
 async function handleMassImportFiles(files) {
   if (!files || files.length === 0) return;
   if (typeof JSZip === 'undefined') { alert("ZIP support isn't loaded yet — please wait a moment and try again."); return; }
 
-  let poCount = 0, invCount = 0, skipped = 0, unmatched = 0, alreadyEmbedded = 0, conflicts = 0, multiPO = 0;
+  let poCount = 0, invCount = 0, skipped = 0, unmatched = 0, alreadyEmbedded = 0, conflicts = 0, multiPO = 0, updated = 0, newProduction = 0, lineItemsAdded = 0;
   const poNumsTouched = new Set();
 
   for (const file of files) {
@@ -13346,23 +13396,31 @@ async function handleMassImportFiles(files) {
       const category = /invoice|deposit|initial|balance|instal{1,2}ment/i.test(base) ? 'invoice' : 'po';
       const target = category === 'invoice' ? detectInvoiceTarget(rec, base) : null;
 
-      // Store as a genuine document — always the active file for this PO,
-      // never silently swapped back to a built-in embedded copy.
       const base64 = await entry.async('base64');
       const dataUrl = `data:application/pdf;base64,${base64}`;
 
-      const doc = {
-        id: uid('doc_'),
-        name: base,
-        category,
-        type: 'pdf',
-        linkedPO: poNumber,
-        notes: secondPO ? `⚠ Filename also references ${secondPO} — verify which PO(s) this invoice actually covers.` : '',
-        dataUrl,
-        uploadedAt: new Date().toISOString()
-      };
-      if (!state.documents) state.documents = [];
-      state.documents.unshift(doc);
+      // Re-uploading the same-named file for the same PO/category updates
+      // that document's content in place rather than stacking a new copy.
+      let doc = findExistingDocForImport(base, poNumber, category);
+      if (doc) {
+        doc.dataUrl = dataUrl;
+        doc.uploadedAt = new Date().toISOString();
+        if (secondPO) doc.notes = `⚠ Filename also references ${secondPO} — verify which PO(s) this invoice actually covers.`;
+        updated++;
+      } else {
+        doc = {
+          id: uid('doc_'),
+          name: base,
+          category,
+          type: 'pdf',
+          linkedPO: poNumber,
+          notes: secondPO ? `⚠ Filename also references ${secondPO} — verify which PO(s) this invoice actually covers.` : '',
+          dataUrl,
+          uploadedAt: new Date().toISOString()
+        };
+        if (!state.documents) state.documents = [];
+        state.documents.unshift(doc);
+      }
       // A re-import that overlaps a previous one (same zip run twice, or two
       // zips with shared files) shouldn't silently clobber a slot that's
       // already correctly filled by a DIFFERENT file — that's exactly how
@@ -13392,6 +13450,66 @@ async function handleMassImportFiles(files) {
           if (fields.currency && (!rec.currency || rec.currency === 'RMB')) rec.currency = fields.currency;
           if (fields.paymentTerms && !rec.paymentTerms) rec.paymentTerms = fields.paymentTerms;
           if (fields.orderDate && !rec.orderDate) rec.orderDate = fields.orderDate;
+
+          if (category === 'po') {
+            // Contracts state lead time in calendar days, not a finish date —
+            // compute one so the "-" that used to sit in the Finish column
+            // gets filled instead of needing a manual entry.
+            const baseDate = rec.orderDate || fields.orderDate;
+            // Use the LONGEST lead time mentioned (foundation brushes usually
+            // run longer than everything else) — the order isn't fully
+            // delivered until its slowest line finishes.
+            const maxLead = Math.max(fields.leadDaysDefault || 0, fields.leadDaysBrush || 0) || null;
+            if (!rec.finishDate && baseDate && maxLead) {
+              rec.finishDate = addDaysISO(baseDate, maxLead);
+            }
+
+            // Auto-create (or reuse) the matching Current Production card and
+            // fill in its line items straight from the contract table — this
+            // is the "just one template, auto-detect it" behavior: a fresh PO
+            // contract shouldn't require building the production card by hand.
+            const { po: prodPO, isNew: prodIsNew, inCompleted } = findOrCreateProductionPO(poNumber);
+            if (prodIsNew) newProduction++;
+            if (!inCompleted) {
+              if (!prodPO.productionStart && baseDate) prodPO.productionStart = addDaysISO(baseDate, 1);
+              if (fields.currency && (!prodPO.currency || prodPO.currency === 'USD')) prodPO.currency = fields.currency;
+              const rows = parseContractLineItemsFromText(text);
+              rows.forEach(row => {
+                const dup = prodPO.lineItems.some(li => (+li.quantity || 0) === row.qty && Math.abs((+li.unitPrice || 0) - row.unitPrice) < 0.01);
+                if (dup) return;
+                const match = matchContractSnippetToSku(row.rawSnippet);
+                if (match && prodPO.lineItems.some(li => li.sku === match.sku)) return;
+                const isBrush = /foundation\s*brush/i.test(row.rawSnippet) || (match && /foundation\s*brush/i.test(match.name));
+                const itemLead = (isBrush ? fields.leadDaysBrush : fields.leadDaysDefault) || fields.leadDaysDefault || 0;
+                const itemPromise = prodPO.productionStart && itemLead ? addDaysISO(prodPO.productionStart, itemLead) : '';
+                prodPO.lineItems.push({
+                  id: uid('li_'), sku: match ? match.sku : '', name: match ? match.name : row.rawSnippet,
+                  photo: '', quantity: row.qty, inspectedUnits: 0, unitsCompleted: 0,
+                  promiseDate: itemPromise, actualProductionEndDate: '',
+                  leadTime: itemLead, unitPrice: row.unitPrice
+                });
+                lineItemsAdded++;
+              });
+              const latest = prodPO.lineItems.reduce((max, li) => (li.promiseDate && li.promiseDate > max) ? li.promiseDate : max, prodPO.promiseDate || '');
+              if (latest) prodPO.promiseDate = latest;
+              if (rec.finishDate && (!prodPO.promiseDate || rec.finishDate > prodPO.promiseDate)) prodPO.promiseDate = rec.finishDate;
+            }
+          } else {
+            // Apply this invoice's own instalment amount/date to the actual
+            // payment slot — previously only PO-level fields were filled, so
+            // the Deposit/2nd/3rd amount and date columns stayed stuck on "-"
+            // even though the number had already been read off the PDF.
+            if (target.idx === 0) {
+              if (fields.invoiceAmount != null && rec.payments[0].amount == null) rec.payments[0].amount = fields.invoiceAmount;
+              if (fields.invoiceDate && !rec.payments[0].date) rec.payments[0].date = fields.invoiceDate;
+            } else {
+              const invObj = findPayInvoice(rec, target.idx, target.invId);
+              if (invObj) {
+                if (fields.invoiceAmount != null && invObj.amount == null) invObj.amount = fields.invoiceAmount;
+                if (fields.invoiceDate && !invObj.date) invObj.date = fields.invoiceDate;
+              }
+            }
+          }
         } catch (e) {
           // Best-effort — leave fields for manual entry if extraction fails
         }
@@ -13402,6 +13520,9 @@ async function handleMassImportFiles(files) {
   saveState();
   render();
   const parts = [`${poCount} PO file${poCount===1?'':'s'}`, `${invCount} invoice file${invCount===1?'':'s'}`, `${poNumsTouched.size} PO${poNumsTouched.size===1?'':'s'} touched`];
+  if (updated) parts.push(`${updated} existing file${updated===1?'':'s'} updated in place`);
+  if (newProduction) parts.push(`${newProduction} new production card${newProduction===1?'':'s'}`);
+  if (lineItemsAdded) parts.push(`${lineItemsAdded} line item${lineItemsAdded===1?'':'s'} auto-detected`);
   if (alreadyEmbedded) parts.push(`${alreadyEmbedded} already built in (skipped duplicate storage)`);
   if (skipped) parts.push(`${skipped} skipped (excluded)`);
   if (unmatched) parts.push(`${unmatched} unmatched filename${unmatched===1?'':'s'}`);
