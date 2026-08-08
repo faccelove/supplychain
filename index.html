@@ -4107,6 +4107,14 @@
 const REORDER_DAYS = 45;
 const TARGET_AFTER_ARRIVAL = 90;
 const DEFAULT_LEAD_DAYS = 30;
+// A "critical" SKU with a batch already in production, whose total cover
+// (current stock + that incoming batch) lands within this many days of the
+// REORDER_DAYS safety threshold, is treated the same as one that clears it
+// outright — see isExpediteOnly() below. ADS is a noisy 3-day rolling
+// average, so a SKU sitting a day or two short of 45 (e.g. 44) already has
+// an appropriately-sized order on the way; the fix is expediting that PO,
+// not raising a "place a brand new order" alarm over a rounding-sized gap.
+const EXPEDITE_ONLY_TOLERANCE_DAYS = 5;
 // Permanently embedded reference copies of PO 07–PO 13 manufacturer
 // Purchase Orders and Invoices, plus their payment-schedule seed data.
 // These live OUTSIDE `state` on purpose — they ship inside this HTML file
@@ -6177,7 +6185,7 @@ function buildWarehouseReorderBannerHTML() {
   // shelf hits zero. That calls for expediting the existing PO, not placing
   // a new one, so it gets pulled into its own bucket below instead of
   // inflating the headline reorder count under a scary CRITICAL badge.
-  const isExpediteOnly = p => p.status === 'critical' && p.inProductionQty > 0 && p.daysTotal > REORDER_DAYS;
+  const isExpediteOnly = p => p.status === 'critical' && p.inProductionQty > 0 && p.daysTotal > REORDER_DAYS - EXPEDITE_ONLY_TOLERANCE_DAYS;
 
   // "In pipeline" SKUs already have enough incoming production to clear the
   // reorder threshold once it lands (see getCombinedWarehouseReorder) — they
@@ -15252,7 +15260,7 @@ async function exportReorderReport() {
   // a new one, so it's pulled into its own table below instead of inflating
   // the main reorder list under a CRITICAL label (same rule as the
   // warehouse reorder banner).
-  const isExpediteOnly = p => p.status === 'critical' && p.inProductionQty > 0 && p.daysTotal > REORDER_DAYS;
+  const isExpediteOnly = p => p.status === 'critical' && p.inProductionQty > 0 && p.daysTotal > REORDER_DAYS - EXPEDITE_ONLY_TOLERANCE_DAYS;
 
   // Only SKUs that genuinely need a fresh order — 'pipeline' SKUs already have
   // enough incoming production to clear the reorder threshold once it lands,
@@ -15570,7 +15578,7 @@ async function exportReorderReportAmazon() {
   // a new one, so it's pulled into its own table below instead of inflating
   // the main reorder list under a CRITICAL label (same rule as the
   // warehouse reorder banner).
-  const isExpediteOnly = p => p.status === 'critical' && p.inProductionQty > 0 && p.daysTotal > REORDER_DAYS;
+  const isExpediteOnly = p => p.status === 'critical' && p.inProductionQty > 0 && p.daysTotal > REORDER_DAYS - EXPEDITE_ONLY_TOLERANCE_DAYS;
 
   // Only SKUs that genuinely need a fresh order — 'pipeline' SKUs already have
   // enough incoming production to clear the reorder threshold once it lands,
