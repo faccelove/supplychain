@@ -6063,7 +6063,7 @@
           "sku": "DPCD2-XD572002",
           "name": "Everlove Mascara (Brown)",
           "photo": "",
-          "quantity": 14000,
+          "quantity": 1040,
           "inspectedUnits": 0,
           "unitsCompleted": 0,
           "promiseDate": "2026-08-30",
@@ -6428,6 +6428,33 @@
     }
   ],
   "completedProduction": [
+    {
+      "id": "po_lcozws0f3pswu",
+      "supplier": "GZ Hongshun Biotech",
+      "poNumber": "PO 19 (Partial)",
+      "currency": "RMB",
+      "productionStart": "2026-07-16",
+      "completedAt": "2026-08-10T08:49:21.827Z",
+      "lineItems": [
+        {
+          "id": "li_wta5zlq5apswt",
+          "sku": "DPCD2-XD572002",
+          "name": "Everlove Mascara (Brown)",
+          "photo": "",
+          "quantity": 12960,
+          "inspectedUnits": 0,
+          "unitsCompleted": 12960,
+          "promiseDate": "2026-08-30",
+          "actualProductionEndDate": "",
+          "leadTime": 45,
+          "unitPrice": 5.75,
+          "productionCompleted": true
+        }
+      ],
+      "partialSourcePoId": "po_o3l1ijgndehmz",
+      "partialSourceLiId": "li_71m55dhgdehmz",
+      "partialSourcePoNumber": "PO 19"
+    },
     {
       "id": "po_zsyruxl8eehmz",
       "poNumber": "PO 14",
