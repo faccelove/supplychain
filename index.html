@@ -153,26 +153,6 @@
     filter: saturate(0.85);
   }
 
-  /* US EU Split Sales Tracker's US Store / EU Store sub-tabs — light
-     golden yellow pills, widely spaced so US owns the left half and EU
-     owns the right half of the bar. */
-  #sub-nav-split {
-    gap: 16px;
-    padding: 14px 48px;
-    justify-content: center;
-  }
-  #sub-nav-split .sub-nav-item {
-    flex: 1 1 0;
-    justify-content: center;
-    border: 1px solid var(--gold-border);
-    border-radius: 20px;
-    background: var(--gold-bg);
-    color: #8A6D16;
-    padding: 11px 0;
-  }
-  #sub-nav-split .sub-nav-item:hover { background: #FBEEC4; color: #8A6D16; }
-  #sub-nav-split .sub-nav-item.active { background: var(--gold); color: var(--white); border-color: var(--gold-border); }
-
   main {
     padding: 32px 48px 64px;
     flex: 1;
@@ -3896,7 +3876,6 @@
   <nav class="main-nav" id="main-nav">
     <button class="nav-item" data-view="warehouse"><span class="nav-emoji">📦</span> Warehouse</button>
     <button class="nav-item" data-view="paymentSchedule"><span class="nav-emoji">💰</span> Payment Tracker <span class="nav-count" id="nav-count-pay">0</span></button>
-    <button class="nav-item" data-view="splitTracker"><span class="nav-emoji">🔀</span> US EU Split Sales Tracker</button>
     <button class="nav-item" data-view="productionSchedule"><span class="nav-emoji">🗓️</span> Production Schedule</button>
     <button class="nav-item" data-view="dashboard"><span class="nav-emoji">📊</span> Analytics Dashboard</button>
     <button class="nav-item" data-view="sales"><span class="nav-emoji">📈</span> Avg Daily Sales <span class="nav-count" id="nav-count-sales">0</span></button>
@@ -3919,10 +3898,6 @@
 <nav class="sub-nav" id="sub-nav" style="display:none;">
   <button class="sub-nav-item" data-subview="inProduction"><span class="sub-nav-emoji">⏳</span> In Production <span id="sub-count-ip">0</span></button>
   <button class="sub-nav-item" data-subview="completedProduction"><span class="sub-nav-emoji">✅</span> Completed Production <span id="sub-count-cp">0</span></button>
-</nav>
-<nav class="sub-nav" id="sub-nav-split" style="display:none;">
-  <button class="sub-nav-item" data-subview="splitUS"><span class="sub-nav-emoji">🇺🇸</span> US Store</button>
-  <button class="sub-nav-item" data-subview="splitEU"><span class="sub-nav-emoji">🇪🇺</span> EU Store</button>
 </nav>
 <!-- Payment Tracker's 5 sub-tabs render inline (via renderPaymentTrackerSubTabs)
      directly above the table inside the page content, not as a fixed nav bar,
@@ -3978,7 +3953,6 @@
 <input type="file" id="oti-file-input" accept=".pdf,.png,.jpg,.jpeg" hidden>
 <input type="file" id="oti-import-input" accept=".pdf" multiple hidden>
 <input type="file" id="tsv-input" accept=".tsv,.txt,.csv" hidden>
-<input type="file" id="split-import-input" accept=".xlsx,.xls,.tsv,.txt,.csv" hidden>
 
 <!-- TSV date picker modal -->
 <div class="transfer-overlay" id="tsv-date-overlay" style="display:none;">
@@ -3995,35 +3969,6 @@
     <div class="transfer-modal-actions" style="margin-top:24px;">
       <button class="btn btn-ghost" id="tsv-date-cancel">Cancel</button>
       <button class="btn btn-primary" id="tsv-date-confirm">Import</button>
-    </div>
-  </div>
-</div>
-
-<!-- US EU Split Sales Tracker — shared "which date is this for?" modal for
-     all four import buttons (opening inventory, sales, units received,
-     non-store outbound). -->
-<div class="transfer-overlay" id="split-date-overlay" style="display:none;">
-  <div class="transfer-modal" style="max-width:420px;">
-    <h2 id="split-date-title">📅 Which date is this for?</h2>
-    <p id="split-date-desc" style="font-size:13px; color:var(--ink-soft); margin-bottom:20px; line-height:1.6;"></p>
-    <div class="receive-modal-field">
-      <label for="split-date-input" style="font-size:11px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase; color:var(--ink-mute); display:block; margin-bottom:8px;">Date</label>
-      <input type="date" id="split-date-input" style="width:100%; padding:10px 12px; font-family:inherit; font-size:14px; border:1px solid var(--line); border-radius:var(--radius); background:var(--white); color:var(--ink); outline:none;">
-    </div>
-    <div class="receive-modal-field" id="split-category-field" style="display:none; margin-top:14px;">
-      <label for="split-category-input" style="font-size:11px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase; color:var(--ink-mute); display:block; margin-bottom:8px;">Outbound category (applies to all rows in this file)</label>
-      <select id="split-category-input" style="width:100%; padding:10px 12px; font-family:inherit; font-size:14px; border:1px solid var(--line); border-radius:var(--radius); background:var(--white); color:var(--ink); outline:none;">
-        <option value="FBA">✅ FBA (replenishment)</option>
-        <option value="Seeding">✅ Seeding</option>
-        <option value="PR">✅ PR</option>
-        <option value="CS">✅ CS Replacement</option>
-        <option value="Damages">✅ Damages</option>
-      </select>
-    </div>
-    <div id="split-date-meta" style="font-size:12px; color:var(--ink-mute); margin-top:10px; min-height:18px;"></div>
-    <div class="transfer-modal-actions" style="margin-top:24px;">
-      <button class="btn btn-ghost" onclick="closeSplitDateModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="confirmSplitDateModal()">Import</button>
     </div>
   </div>
 </div>
@@ -4152,15 +4097,7 @@ let state = {
   adsReport: null,
   adsSKURegistry: [],  // fixed SKU allowlist — {sku, name}
   phasedOutWH: [],  // items phased out from warehouse inventory (not deleted, just hidden from active lists)
-  toShipAmazon: [],  // pending Amazon shipments — units still physically at DayOne but earmarked, so we deduct them from DayOne's effective stock until marked shipped
-  // US EU Split Sales Tracker — two independent per-store ledgers (US Store /
-  // EU Store), each tracking opening (1st-of-month) inventory, units
-  // received, sales, and non-store outbound (FBA/seeding/PR/CS/damages) per
-  // SKU per month. See ensureSplitTracker() for shape enforcement.
-  splitTracker: {
-    us: { openings: {}, receipts: [], sales: [], outbound: [] },
-    eu: { openings: {}, receipts: [], sales: [], outbound: [] }
-  }
+  toShipAmazon: []  // pending Amazon shipments — units still physically at DayOne but earmarked, so we deduct them from DayOne's effective stock until marked shipped
 };
 
 let currentView = 'inventoryDayOne';
@@ -4168,13 +4105,6 @@ let activeOrderSku = null;
 let pendingImportTarget = null;
 let pendingPOFileTarget = null;
 let pendingPhotoTarget = null;
-
-// US EU Split Sales Tracker — transient state. _splitPendingImport holds the
-// parsed rows awaiting date (and, for outbound, category) confirmation in
-// the shared modal. splitTrackerMonth remembers which month each sub-tab
-// (us/eu) is currently viewing — resets to the current month on reload.
-let _splitPendingImport = null;
-let splitTrackerMonth = {};
 
 // Bulk selection state — only used in BS warehouse view for the "move many to
 // DayOne at once" workflow. Cleared whenever the user navigates away or clicks
@@ -4329,13 +4259,11 @@ function applyRemoteState(parsed) {
     warehouseInventory: { bs: {}, dayone: {} },
     phasedOutWH: [],
     toShipAmazon: [],
-    splitTracker: { us: { openings: {}, receipts: [], sales: [], outbound: [] }, eu: { openings: {}, receipts: [], sales: [], outbound: [] } },
     ...parsed
   };
   if (!Array.isArray(state.phasedOutWH)) state.phasedOutWH = [];
   if (!Array.isArray(state.toShipAmazon)) state.toShipAmazon = [];
   if (!Array.isArray(state.oneTimeInvoices)) state.oneTimeInvoices = [];
-  ensureSplitTracker();
   if (Array.isArray(state.products)) state.products = {};
   state.suppliers.forEach(s => {
     if (!Array.isArray(s.productList)) s.productList = [];
@@ -5321,7 +5249,6 @@ function setView(view) {
     || view === 'productDev' || view === 'newProductPlanning' || view === 'productImprovement') view = 'inventoryDayOne';
   if (view === 'warehouse')  view = 'inventoryDayOne';
   if (view === 'paymentSchedule') view = 'usInvoices';
-  if (view === 'splitTracker') view = 'splitUS';
   // Legacy BS shortcut — BS is retired; redirect to DayOne so old bookmarks
   // and saved view state still land somewhere valid.
   if (view === 'inventoryBS') view = 'inventoryDayOne';
@@ -5344,21 +5271,17 @@ function setView(view) {
   currentView = view;
   const subNav   = document.getElementById('sub-nav');
   const subNavWH = document.getElementById('sub-nav-wh');
-  const subNavSplit = document.getElementById('sub-nav-split');
   const isProd = (view === 'inProduction' || view === 'completedProduction');
   const isWH   = (view === 'inventoryBS' || view === 'inventoryDayOne' || view === 'phasedOutWH' || view === 'toShipAmazon' || view === 'shippedOutAmazon');
   const isPay  = (view === 'usInvoices' || view === 'euInvoices' || view === 'complianceInvoices' || view === 'inspectionInvoices' || view === 'sampleProductionInvoices'
     || view === 'usInvoicesArchive' || view === 'euInvoicesArchive' || view === 'complianceInvoicesArchive' || view === 'inspectionInvoicesArchive' || view === 'sampleProductionInvoicesArchive');
-  const isSplit = (view === 'splitUS' || view === 'splitEU');
   subNav.style.display   = isProd ? 'flex' : 'none';
   subNavWH.style.display = isWH   ? 'flex' : 'none';
-  subNavSplit.style.display = isSplit ? 'flex' : 'none';
   document.querySelectorAll('.nav-item').forEach(b => {
     let isActive = b.dataset.view === view;
     if (b.dataset.view === 'production' && isProd) isActive = true;
     if (b.dataset.view === 'warehouse'  && isWH)   isActive = true;
     if (b.dataset.view === 'paymentSchedule' && isPay) isActive = true;
-    if (b.dataset.view === 'splitTracker' && isSplit) isActive = true;
     b.classList.toggle('active', isActive);
   });
   document.querySelectorAll('.sub-nav-item').forEach(b => {
@@ -5392,8 +5315,6 @@ function render() {
   else if (currentView === 'inspectionInvoicesArchive')   main.innerHTML = renderOneTimeInvoices('inspection', true);
   else if (currentView === 'sampleProductionInvoicesArchive') main.innerHTML = renderOneTimeInvoices('sampleProduction', true);
   else if (currentView === 'productionSchedule')   main.innerHTML = renderProductionSchedule();
-  else if (currentView === 'splitUS')              main.innerHTML = renderSplitTracker('us');
-  else if (currentView === 'splitEU')              main.innerHTML = renderSplitTracker('eu');
   // Update reorder banner above sub-nav (only visible on warehouse views)
   const onWarehouse = currentView === 'inventoryBS' || currentView === 'inventoryDayOne';
   updateWarehouseReorderBanner(onWarehouse); // banner only makes sense on the active-stock views, not Phased Out
@@ -14596,465 +14517,6 @@ function clearSalesSearch() {
   filterSalesTable('');
 }
 
-/* ============================================================
-   US EU SPLIT SALES TRACKER
-   Two independent per-store (US Store / EU Store) monthly ledgers,
-   per SKU: opening (1st-of-month) + received − sold − other
-   outbound (FBA/seeding/PR/CS/damages) = closing. SKU master list,
-   names and photos are synced live from the DayOne warehouse.
-   Built exactly to spec — no cross-entity reconciliation logic.
-   ============================================================ */
-
-function ensureSplitTracker() {
-  if (!state.splitTracker || typeof state.splitTracker !== 'object') {
-    state.splitTracker = { us: {}, eu: {} };
-  }
-  ['us', 'eu'].forEach(store => {
-    const s = state.splitTracker[store] = (state.splitTracker[store] && typeof state.splitTracker[store] === 'object') ? state.splitTracker[store] : {};
-    if (!s.openings || typeof s.openings !== 'object') s.openings = {};
-    if (!Array.isArray(s.receipts)) s.receipts = [];
-    if (!Array.isArray(s.sales))    s.sales    = [];
-    if (!Array.isArray(s.outbound)) s.outbound = [];
-  });
-  return state.splitTracker;
-}
-
-// Master SKU list for the tracker's tables — synced from the DayOne
-// warehouse (customized + whitelabel; packaging isn't a sellable SKU, same
-// exclusion used elsewhere e.g. getCombinedWarehouseReorder).
-function getSplitTrackerSkuList() {
-  const dayo = ensureWHWarehouse('dayone');
-  const map = new Map();
-  ['customized', 'whitelabel'].forEach(sec => {
-    (dayo[sec] || []).forEach(item => {
-      const sku = String(item.sku || '').trim();
-      if (!sku) return;
-      if (!map.has(sku)) map.set(sku, { sku, name: item.name || sku, photo: item.photo || '' });
-      else {
-        const e = map.get(sku);
-        if (!e.name && item.name) e.name = item.name;
-        if (!e.photo && item.photo) e.photo = item.photo;
-      }
-    });
-  });
-  return Array.from(map.values()).sort((a, b) => a.sku.localeCompare(b.sku));
-}
-
-function splitMonthKey(iso) { return String(iso || '').slice(0, 7); } // 'YYYY-MM'
-function splitCurrentMonthKey() { return todayISO().slice(0, 7); }
-function fmtMonthLabel(monthKey) {
-  const parts = String(monthKey || '').split('-').map(Number);
-  if (parts.length < 2 || !parts[0] || !parts[1]) return monthKey || '—';
-  const d = new Date(parts[0], parts[1] - 1, 1);
-  return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
-}
-
-// Every month that has any data at all for this store, plus the current
-// month, so the filter always has somewhere sensible to land.
-function getSplitAvailableMonths(store) {
-  const t = ensureSplitTracker()[store];
-  const set = new Set(Object.keys(t.openings));
-  [...t.receipts, ...t.sales, ...t.outbound].forEach(r => set.add(splitMonthKey(r.date)));
-  set.add(splitCurrentMonthKey());
-  return Array.from(set).filter(Boolean).sort();
-}
-
-function getSplitSelectedMonth(store) {
-  const months = getSplitAvailableMonths(store);
-  if (!splitTrackerMonth[store] || !months.includes(splitTrackerMonth[store])) {
-    splitTrackerMonth[store] = splitCurrentMonthKey();
-  }
-  return splitTrackerMonth[store];
-}
-
-function setSplitMonth(store, monthKey) {
-  splitTrackerMonth[store] = monthKey;
-  render();
-}
-
-// Per-SKU ledger for one store + month: opening + received − sold − outbound = closing.
-function computeSplitLedger(store, monthKey) {
-  const t = ensureSplitTracker()[store];
-  const skus = getSplitTrackerSkuList();
-  const opening = t.openings[monthKey] || {};
-
-  const sumBySku = (arr) => {
-    const m = new Map();
-    arr.forEach(r => {
-      if (splitMonthKey(r.date) !== monthKey) return;
-      m.set(r.sku, (m.get(r.sku) || 0) + (+r.qty || 0));
-    });
-    return m;
-  };
-  const receivedBySku = sumBySku(t.receipts);
-  const soldBySku     = sumBySku(t.sales);
-  const outboundBySku = sumBySku(t.outbound);
-
-  // Most recent "units received" date per SKU within the selected month —
-  // this is what populates the 🚚 "Delivered to DayOne" column.
-  const latestReceiptDate = new Map();
-  t.receipts.forEach(r => {
-    if (splitMonthKey(r.date) !== monthKey) return;
-    const cur = latestReceiptDate.get(r.sku);
-    if (!cur || r.date > cur) latestReceiptDate.set(r.sku, r.date);
-  });
-
-  return skus.map(p => {
-    const open     = +opening[p.sku] || 0;
-    const received = receivedBySku.get(p.sku) || 0;
-    const sold     = soldBySku.get(p.sku) || 0;
-    const outbound = outboundBySku.get(p.sku) || 0;
-    return {
-      sku: p.sku, name: p.name, photo: p.photo,
-      deliveredDate: latestReceiptDate.get(p.sku) || null,
-      opening: open, received, sold, outbound,
-      closing: open + received - sold - outbound
-    };
-  });
-}
-
-// Default row order for the ledger table. EU just ranks by highest sales.
-// US ranks by highest sales too, but only among SKUs that actually have US
-// received stock this month — SKUs with zero US received stock sink to the
-// bottom regardless of sales, since a sale with no received stock behind it
-// usually signals a data gap worth noticing.
-function defaultSplitSort(rows, store) {
-  const arr = rows.slice();
-  if (store === 'us') {
-    arr.sort((a, b) => {
-      const aHas = a.received > 0 ? 1 : 0;
-      const bHas = b.received > 0 ? 1 : 0;
-      if (aHas !== bHas) return bHas - aHas;
-      return b.sold - a.sold;
-    });
-  } else {
-    arr.sort((a, b) => b.sold - a.sold);
-  }
-  return arr;
-}
-
-function renderSplitTracker(store) {
-  ensureSplitTracker();
-  const monthKey = getSplitSelectedMonth(store);
-  const months   = getSplitAvailableMonths(store);
-  const rows     = defaultSplitSort(computeSplitLedger(store, monthKey), store);
-  const storeLabel = store === 'us' ? 'US Store' : 'EU Store';
-  const flag       = store === 'us' ? '🇺🇸' : '🇪🇺';
-  const storeUpper = store.toUpperCase();
-
-  const monthOptions = months.map(m =>
-    `<option value="${escapeAttr(m)}" ${m === monthKey ? 'selected' : ''}>${escapeHtml(fmtMonthLabel(m))}</option>`
-  ).join('');
-
-  const rowsHtml = rows.map(r => {
-    const photo = r.photo
-      ? `<img src="${escapeAttr(r.photo)}" alt="" style="width:36px;height:36px;object-fit:cover;border-radius:6px;flex-shrink:0;">`
-      : `<div style="width:36px;height:36px;border-radius:6px;background:var(--lavender-pale);flex-shrink:0;"></div>`;
-    const delivered = r.deliveredDate
-      ? `🚚 ${escapeHtml(fmtDateDisplay(r.deliveredDate))}`
-      : `<span style="color:var(--ink-mute)">—</span>`;
-    return `<tr>
-      <td class="product-cell">
-        <div style="display:flex; align-items:center; gap:10px;">
-          ${photo}
-          <div>
-            <div style="font-weight:600;">${escapeHtml(r.sku)}</div>
-            <div style="font-size:12px; color:var(--ink-mute);">${escapeHtml(r.name)}</div>
-          </div>
-        </div>
-      </td>
-      <td data-sort-value="${escapeAttr(r.deliveredDate || '')}">${delivered}</td>
-      <td class="numeric" data-sort-value="${r.opening}">${fmtNumOrDash(r.opening)}</td>
-      <td class="numeric" data-sort-value="${r.received}" style="color:var(--status-healthy);">${r.received ? '+' + fmtNum(r.received) : '—'}</td>
-      <td class="numeric" data-sort-value="${r.sold}" style="color:var(--status-critical);">${r.sold ? '−' + fmtNum(r.sold) : '—'}</td>
-      <td class="numeric" data-sort-value="${r.outbound}" style="color:var(--status-reorder);">${r.outbound ? '−' + fmtNum(r.outbound) : '—'}</td>
-      <td class="numeric" data-sort-value="${r.closing}"><strong>${fmtNum(r.closing)}</strong></td>
-      <td data-label=""><button class="row-delete" onclick="deleteSplitRow('${store}', '${escapeAttr(r.sku)}')" title="Remove this SKU's data for ${escapeAttr(fmtMonthLabel(monthKey))}">${trashIconSVG()}</button></td>
-    </tr>`;
-  }).join('');
-
-  return `
-    <div class="page-header">
-      <h1 class="page-title">${flag} ${storeLabel} — US EU Split Sales Tracker</h1>
-      <p class="page-subtitle">Per-SKU monthly ledger for the ${storeLabel} · opening + received − sold − other outflows = closing · SKUs, names &amp; photos sync live from the DayOne warehouse</p>
-    </div>
-    <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px;">
-      <label for="split-month-${store}" style="font-size:11px; font-weight:600; letter-spacing:0.1em; text-transform:uppercase; color:var(--ink-mute);">Month</label>
-      <select id="split-month-${store}" onchange="setSplitMonth('${store}', this.value)" style="padding:8px 12px; border:1px solid var(--line); border-radius:var(--radius); background:var(--white); font-family:inherit; font-size:13px; color:var(--ink);">
-        ${monthOptions}
-      </select>
-    </div>
-    <div class="table-wrap">
-      <table class="dashboard-table sortable-table">
-        <thead><tr>
-          <th>SKU</th><th>🚚 Delivered to DayOne</th>
-          <th class="numeric">Opening</th><th class="numeric">Received</th><th class="numeric is-sorted-desc">Sold</th>
-          <th class="numeric">Other Outflows</th><th class="numeric">Closing</th><th class="no-sort"></th>
-        </tr></thead>
-        <tbody>${rowsHtml || `<tr><td colspan="8" style="text-align:center;padding:32px;color:var(--ink-mute)">No SKUs found in the DayOne warehouse yet — add products under Warehouse first.</td></tr>`}</tbody>
-      </table>
-    </div>
-    <div class="action-bar" style="margin-top:32px; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
-      <button class="btn btn-primary" onclick="triggerSplitImport('openings', '${store}')" title="Reads the same Excel export as the Warehouse tab's Sync from Fulfillment Partner — SKU + Stock Forecast columns. Sets ${storeUpper} Store's opening inventory for the 1st of the month. A combined CSV with both a US and EU column also still works and seeds both stores at once.">🚚 Sync ${storeUpper} Inventory from Fulfillment Partner (1st of Month)</button>
-      <button class="btn" onclick="triggerSplitImport('sales', '${store}')">📥 Import ${storeUpper} Sales (TSV)</button>
-      <button class="btn" onclick="triggerSplitImport('receipts', '${store}')">📦 Import Units Received (${storeUpper})</button>
-      <button class="btn" onclick="triggerSplitImport('outbound', '${store}')">🚛 Import Non-Store Outbound (${storeUpper})</button>
-    </div>`;
-}
-
-// Removes one SKU's data for the store/month currently being viewed —
-// opening balance, plus any sales/receipts/outbound rows dated within that
-// month. Scoped to a single store's month so deleting a row on the US tab
-// never touches the EU ledger.
-function deleteSplitRow(store, sku) {
-  const monthKey = getSplitSelectedMonth(store);
-  if (!confirm(`Remove all ${store.toUpperCase()} Store data for ${sku} in ${fmtMonthLabel(monthKey)}? This clears opening, received, sold and outbound entries for this SKU in this month only.`)) return;
-  const t = ensureSplitTracker()[store];
-  if (t.openings[monthKey]) delete t.openings[monthKey][sku];
-  t.receipts = t.receipts.filter(r => !(r.sku === sku && splitMonthKey(r.date) === monthKey));
-  t.sales    = t.sales.filter(r => !(r.sku === sku && splitMonthKey(r.date) === monthKey));
-  t.outbound = t.outbound.filter(r => !(r.sku === sku && splitMonthKey(r.date) === monthKey));
-  saveState();
-  render();
-  toast(`Removed ${sku} · ${fmtMonthLabel(monthKey)}`);
-}
-
-function triggerSplitImport(type, store) {
-  _splitPendingImport = { type, store, rows: null };
-  document.getElementById('split-import-input').click();
-}
-
-function normalizeOutboundCategory(v) {
-  const s = String(v || '').trim().toLowerCase();
-  if (/fba/.test(s))            return 'FBA';
-  if (/seed/.test(s))           return 'Seeding';
-  if (/^pr\b|press/.test(s))    return 'PR';
-  if (/\bcs\b|replace/.test(s)) return 'CS';
-  if (/damag/.test(s))          return 'Damages';
-  return '';
-}
-
-// Strips a leading UTF-8 BOM (common in "CSV UTF-8" exports from Excel /
-// fulfillment-partner portals — without this, the very first header cell
-// silently fails every regex test and the whole file gets rejected) and any
-// surrounding quotes a spreadsheet export may have wrapped each cell in.
-function cleanSplitCell(s) {
-  return String(s || '').replace(/^﻿/, '').trim().replace(/^"(.*)"$/, '$1').trim();
-}
-
-// The opening-inventory import accepts a real Excel file exported straight
-// from the fulfillment partner / DayOne — the SAME "sku" + "Stock Forecast"
-// shape the Warehouse tab's "🚚 Sync from Fulfillment Partner" button reads
-// (see importPartnerStock). That export only ever covers ONE warehouse, so
-// unlike the legacy combined US+EU CSV below, this seeds just the store
-// whose tab is currently open.
-function parseSplitOpeningsExcel(file, store) {
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    try {
-      const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
-      if (!rows.length) { toast('Sheet is empty'); return; }
-      const headers = Object.keys(rows[0]);
-      const norm = h => String(h || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      let skuCol = null, qtyCol = null;
-      headers.forEach(h => {
-        const n = norm(h);
-        if (!skuCol && (n === 'sku' || n === 'partnersku' || n === 'productcode' || n === 'itemcode')) skuCol = h;
-        if (!qtyCol && (n === 'stockforecast' || n === 'forecast' || n === 'forecaststock')) qtyCol = h;
-      });
-      if (!skuCol) { toast(`Could not find a "SKU" column in the file — found: ${headers.join(', ')}`); return; }
-      if (!qtyCol) { toast(`Could not find a "Stock Forecast" column in the file — found: ${headers.join(', ')}`); return; }
-      const out = [];
-      rows.forEach(r => {
-        const sku = String(r[skuCol] || '').trim();
-        if (!sku) return;
-        out.push({ sku, qty: Math.max(0, Math.round(toNum(r[qtyCol]))) });
-      });
-      if (!out.length) { toast('No valid rows found in file'); return; }
-      openSplitDateModal('openingsSingle', store, out);
-    } catch (err) {
-      console.error(err);
-      toast('Could not read that Excel file — make sure it\'s the same export the Warehouse tab\'s Sync from Fulfillment Partner uses.');
-    }
-  };
-  reader.readAsArrayBuffer(file);
-}
-
-function parseSplitImportFile(file, type, store) {
-  // Opening-inventory files come straight from the fulfillment partner as a
-  // real .xlsx/.xls — those need SheetJS, not plain-text line splitting.
-  if (type === 'openings' && /\.(xlsx|xls)$/i.test(file.name || '')) {
-    parseSplitOpeningsExcel(file, store);
-    return;
-  }
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    try {
-      const text = String(e.target.result || '').replace(/^﻿/, '');
-      const lines = text.split(/\r?\n/).filter(l => l.trim());
-      if (lines.length < 2) { toast('File is empty or has no data rows'); return; }
-      const delim = lines[0].includes('\t') ? '\t' : ',';
-      const headers = lines[0].split(delim).map(cleanSplitCell);
-      const skuIdx = headers.findIndex(h => /^sku$/i.test(h));
-      if (skuIdx === -1) { toast(`File must have a "SKU" column — found: ${headers.join(', ') || '(no headers read)'}`); return; }
-
-      if (type === 'openings') {
-        // Two supported shapes for a text-based (CSV/TSV) opening-inventory
-        // file. 1) A combined file with both a "US" and an "EU" quantity
-        // column seeds BOTH stores' opening inventory at once. 2) A
-        // single-warehouse export (a "Stock Forecast" or plain "Qty"
-        // column, same idea as the Excel partner-sync above) seeds just the
-        // currently open store, since that shape has no US/EU split.
-        const usIdx = headers.findIndex(h => /\bus\b/i.test(h));
-        const euIdx = headers.findIndex(h => /\beu\b/i.test(h));
-        if (usIdx !== -1 && euIdx !== -1) {
-          const rows = [];
-          for (let i = 1; i < lines.length; i++) {
-            const cols = lines[i].split(delim).map(cleanSplitCell);
-            const sku = cols[skuIdx] || '';
-            if (!sku) continue;
-            const us = parseInt(String(cols[usIdx] || '').replace(/,/g, ''), 10);
-            const eu = parseInt(String(cols[euIdx] || '').replace(/,/g, ''), 10);
-            rows.push({ sku, us: isNaN(us) ? 0 : Math.max(0, us), eu: isNaN(eu) ? 0 : Math.max(0, eu) });
-          }
-          if (!rows.length) { toast('No valid rows found in file'); return; }
-          openSplitDateModal('openings', 'both', rows);
-          return;
-        }
-        const norm = h => String(h || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        let fcIdx = headers.findIndex(h => ['stockforecast', 'forecast', 'forecaststock'].includes(norm(h)));
-        if (fcIdx === -1) fcIdx = headers.findIndex(h => /\b(qty|quantity|units)\b/i.test(h));
-        if (fcIdx === -1) { toast(`File must have either "US" + "EU" columns, or a "Stock Forecast" / "Qty" column for a single-store sync — found: ${headers.join(', ')}`); return; }
-        const rows = [];
-        for (let i = 1; i < lines.length; i++) {
-          const cols = lines[i].split(delim).map(cleanSplitCell);
-          const sku = cols[skuIdx] || '';
-          if (!sku) continue;
-          const qty = parseInt(String(cols[fcIdx] || '').replace(/,/g, ''), 10);
-          if (isNaN(qty)) continue;
-          rows.push({ sku, qty: Math.max(0, qty) });
-        }
-        if (!rows.length) { toast('No valid rows found in file'); return; }
-        openSplitDateModal('openingsSingle', store, rows);
-        return;
-      }
-
-      const qtyIdx = headers.findIndex(h => /\b(qty|quantity|units|sales|sold|received)\b/i.test(h));
-      if (qtyIdx === -1) { toast(`File must have a "Qty" column — found: ${headers.join(', ')}`); return; }
-      const catIdx = type === 'outbound' ? headers.findIndex(h => /\b(category|type|reason)\b/i.test(h)) : -1;
-
-      const rows = [];
-      for (let i = 1; i < lines.length; i++) {
-        const cols = lines[i].split(delim).map(cleanSplitCell);
-        const sku = cols[skuIdx] || '';
-        const qty = parseInt(String(cols[qtyIdx] || '').replace(/,/g, ''), 10);
-        if (!sku || isNaN(qty)) continue;
-        const row = { sku, qty: Math.max(0, qty) };
-        if (type === 'outbound' && catIdx !== -1) row.category = normalizeOutboundCategory(cols[catIdx]);
-        rows.push(row);
-      }
-      if (!rows.length) { toast('No valid rows found in file'); return; }
-      openSplitDateModal(type, store, rows);
-    } catch (err) {
-      console.error(err);
-      toast('Failed to parse file');
-    }
-  };
-  reader.readAsText(file);
-}
-
-function openSplitDateModal(type, store, rows) {
-  _splitPendingImport = { type, store, rows };
-  const storeUpper = store === 'both' ? '' : store.toUpperCase() + ' Store ';
-  const titles = {
-    openings: '🔄 Which month does this fulfillment-partner sync start?',
-    openingsSingle: '🚚 Which month does this fulfillment-partner sync start?',
-    sales:    '📅 Which date are these sales for?',
-    receipts: '📦 Which date were these units received at DayOne?',
-    outbound: '🚛 Which date did these units leave DayOne?'
-  };
-  const descs = {
-    openings: 'This sets the 1st-of-month opening inventory for BOTH the US Store and EU Store tables, for the month containing the date you pick below. Export this straight from your fulfillment partner\'s portal — any column with "SKU", a column containing "US", and a column containing "EU" is enough (e.g. "US Stock", "US Units" all work).',
-    openingsSingle: `This sets the 1st-of-month opening inventory for the ${storeUpper}table only, for the month containing the date you pick below — read from the same "sku" + "Stock Forecast" export the Warehouse tab's Sync from Fulfillment Partner uses. That export only covers one warehouse at a time, so import the ${storeUpper.trim() || 'matching store'}'s own file while its tab is open, then switch tabs and do the other store separately.`,
-    sales:    `This will deduct these sales from the ${storeUpper}table for the selected day.`,
-    receipts: `This will add these units to the ${storeUpper}table and update each SKU's "🚚 Delivered to DayOne" date.`,
-    outbound: `This will deduct these units from the ${storeUpper}table as non-store outbound stock (FBA / seeding / PR / CS / damages).`
-  };
-  document.getElementById('split-date-title').textContent = titles[type] || 'Which date is this for?';
-  document.getElementById('split-date-desc').textContent  = descs[type] || '';
-
-  const needsCategory = type === 'outbound' && !rows.every(r => r.category);
-  document.getElementById('split-category-field').style.display = needsCategory ? 'block' : 'none';
-
-  const input = document.getElementById('split-date-input');
-  input.value = todayISO();
-  document.getElementById('split-date-meta').textContent = `${rows.length} SKU${rows.length === 1 ? '' : 's'} in this file.`;
-  document.getElementById('split-date-overlay').style.display = 'flex';
-  input.focus();
-}
-
-function closeSplitDateModal() {
-  _splitPendingImport = null;
-  document.getElementById('split-date-overlay').style.display = 'none';
-}
-
-function confirmSplitDateModal() {
-  const iso = document.getElementById('split-date-input').value;
-  if (!iso) { toast('Please select a date'); return; }
-  if (!_splitPendingImport || !_splitPendingImport.rows) { closeSplitDateModal(); return; }
-  const { type, store, rows } = _splitPendingImport;
-  const categorySel = document.getElementById('split-category-input').value;
-  applySplitImport(type, store, rows, iso, categorySel);
-  closeSplitDateModal();
-}
-
-function applySplitImport(type, store, rows, iso, categorySel) {
-  const t = ensureSplitTracker();
-  const monthKey = splitMonthKey(iso);
-
-  if (type === 'openings') {
-    ['us', 'eu'].forEach(s => { if (!t[s].openings[monthKey]) t[s].openings[monthKey] = {}; });
-    rows.forEach(r => {
-      t.us.openings[monthKey][r.sku] = r.us;
-      t.eu.openings[monthKey][r.sku] = r.eu;
-    });
-    splitTrackerMonth.us = monthKey;
-    splitTrackerMonth.eu = monthKey;
-    saveState();
-    render();
-    toast(`Imported opening inventory for ${fmtMonthLabel(monthKey)} · ${rows.length} SKU${rows.length === 1 ? '' : 's'}`);
-    return;
-  }
-
-  // Single-warehouse fulfillment-partner sync (Excel "Stock Forecast" export,
-  // or a plain per-store CSV) — only the store whose tab was open when the
-  // import was triggered gets its opening inventory set.
-  if (type === 'openingsSingle') {
-    const s = t[store];
-    if (!s.openings[monthKey]) s.openings[monthKey] = {};
-    rows.forEach(r => { s.openings[monthKey][r.sku] = r.qty; });
-    splitTrackerMonth[store] = monthKey;
-    saveState();
-    render();
-    toast(`Synced ${store.toUpperCase()} Store opening inventory for ${fmtMonthLabel(monthKey)} · ${rows.length} SKU${rows.length === 1 ? '' : 's'}`);
-    return;
-  }
-
-  const bucket = type === 'sales' ? t[store].sales : type === 'receipts' ? t[store].receipts : t[store].outbound;
-  rows.forEach(r => {
-    const entry = { id: uid('spl_'), date: iso, sku: r.sku, qty: r.qty };
-    if (type === 'outbound') entry.category = r.category || categorySel || 'Other';
-    bucket.push(entry);
-  });
-  splitTrackerMonth[store] = monthKey;
-  saveState();
-  render();
-  const verb = type === 'sales' ? 'sales row' : type === 'receipts' ? 'units-received row' : 'non-store outbound row';
-  toast(`Imported ${rows.length} ${verb}${rows.length === 1 ? '' : 's'} for ${store.toUpperCase()} Store · ${iso}`);
-}
-
 /* ---------- Wire-up ---------- */
 document.querySelectorAll('.nav-item').forEach(btn => {
   btn.addEventListener('click', () => setView(btn.dataset.view));
@@ -15071,11 +14533,6 @@ document.getElementById('file-input').addEventListener('change', e => {
 document.getElementById('doc-input').addEventListener('change', e => {
   processDocFiles(Array.from(e.target.files));
   e.target.value = '';
-});
-document.getElementById('split-import-input').addEventListener('change', e => {
-  const f = e.target.files[0];
-  e.target.value = '';
-  if (f && _splitPendingImport) parseSplitImportFile(f, _splitPendingImport.type, _splitPendingImport.store);
 });
 document.getElementById('pos-summary-input').addEventListener('change', e => {
   const f = e.target.files[0];
@@ -15241,7 +14698,7 @@ document.addEventListener('click', e => {
 });
 
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeModal(); closeTransferModal(); closeReceiveModal(); closeDocPreview(); closeTsvDateModal(); closeSplitDateModal(); }
+  if (e.key === 'Escape') { closeModal(); closeTransferModal(); closeReceiveModal(); closeDocPreview(); closeTsvDateModal(); }
 });
 
 loadState().then(() => setView('warehouse'));
