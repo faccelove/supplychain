@@ -1458,7 +1458,9 @@
   .pay-contract-date { font-size: 12px; color: var(--ink-soft); padding: 3px 0; }
   .pay-contract-date .pay-instalment-label { margin-right: 6px; }
   .pay-remaining-due { font-size: 10px; color: var(--status-critical); font-weight: 600; margin: 4px 0; line-height: 1.4; }
+  .pay-remaining-due-overdue { text-decoration: underline; }
   .pay-target-input { margin-bottom: 4px; }
+  .pay-target-due-input { margin-top: 4px; }
 
   .pay-paiddue-cell { min-width: 110px; text-align: center; }
   .pay-paiddue-toggle, .pay-paiddue-badge {
@@ -4480,6 +4482,7 @@ function seedEmbeddedPOData() {
         rec.payments[idx] = { invoices: migrated };
       }
       if (rec.payments[idx].targetAmount === undefined) rec.payments[idx].targetAmount = null;
+      if (rec.payments[idx].targetDueDate === undefined) rec.payments[idx].targetDueDate = '';
     });
     // Manual Paid/Due flag for the whole PO row — separate from the
     // auto-computed per-column coverage status, since "has this actually
@@ -11950,8 +11953,8 @@ function findOrCreatePayRecord(poNumber) {
       paymentTerms: '',
       payments: [
         { date: '', amount: null, invoiceDocId: null, skuAllocations: null, percent: null },
-        { invoices: [] },
-        { invoices: [] }
+        { invoices: [], targetAmount: null, targetDueDate: '' },
+        { invoices: [], targetAmount: null, targetDueDate: '' }
       ],
       poDocId: null,
       checked: false,
@@ -11970,7 +11973,11 @@ function findOrCreatePayRecord(poNumber) {
     ];
   }
   if (rec.payments[0].invoiceDocId === undefined) rec.payments[0].invoiceDocId = null;
-  [1, 2].forEach(idx => { if (!Array.isArray(rec.payments[idx].invoices)) rec.payments[idx].invoices = []; });
+  [1, 2].forEach(idx => {
+    if (!Array.isArray(rec.payments[idx].invoices)) rec.payments[idx].invoices = [];
+    if (rec.payments[idx].targetAmount === undefined) rec.payments[idx].targetAmount = null;
+    if (rec.payments[idx].targetDueDate === undefined) rec.payments[idx].targetDueDate = '';
+  });
   return rec;
 }
 
@@ -12233,6 +12240,15 @@ function togglePaySkuExpand(id) {
 function updatePayColumnTarget(recId, idx, value) {
   const rec = findPayRecord(recId); if (!rec) return;
   rec.payments[idx].targetAmount = value === '' ? null : +value;
+  saveState();
+}
+
+// When this 2nd/3rd payment tranche is contractually due (typed in once
+// from the payment terms, e.g. "on shipment" translated to a real date) —
+// lets remainingDueNote() tell Sven not just how much but by when.
+function updatePayColumnDueDate(recId, idx, value) {
+  const rec = findPayRecord(recId); if (!rec) return;
+  rec.payments[idx].targetDueDate = value || '';
   saveState();
 }
 
@@ -12598,23 +12614,32 @@ function renderPaymentScheduleByEntity(entityFilter, archived) {
       const [cls, label] = map[status];
       return `<span class="pay-status-chip ${cls}">${label}</span>`;
     };
-    // Tells Sven exactly how much is still owed on a partially-invoiced
-    // column. Needs a "target" total for the tranche (Fifi types this in
-    // once, from the contract's payment terms) — remaining = target minus
-    // whatever's been invoiced so far, regardless of file-attachment status
-    // (this is about money, not documentation).
+    // Tells Sven exactly how much is still owed on this column and by when —
+    // this is the thing to check when a payment is still pending, since
+    // nothing else in the row answers "how much" and "when" while zero
+    // invoices have been logged yet. Needs a "target" total and/or a due
+    // date for the tranche (Fifi types these in once, from the contract's
+    // payment terms) — remaining = target minus whatever's been invoiced so
+    // far, regardless of file-attachment status (this is about money, not
+    // documentation). Shows for any column that isn't already Fully Paid,
+    // including one with nothing logged against it at all yet.
     const remainingDueNote = (idx, label) => {
       const status = getPayColumnStatus(rec, idx, lineItems);
-      if (status !== 'partial' && status !== 'logged') return '';
+      if (status === 'full') return '';
       const target = p[idx]?.targetAmount;
-      if (target == null) return '';
+      const dueDate = p[idx]?.targetDueDate;
+      if (target == null && !dueDate) return '';
       const invoiced = (p[idx]?.invoices || []).reduce((s, inv) => s + (+inv.amount || 0), 0);
-      const remaining = target - invoiced;
-      if (remaining <= 0) return '';
-      return `<div class="pay-remaining-due">Due: ${fmtMoneyConverted(remaining, rec.currency)} for the remaining portion of the ${label}</div>`;
+      const remaining = target != null ? target - invoiced : null;
+      if (target != null && remaining <= 0) return '';
+      const amountText = remaining != null ? fmtMoneyConverted(remaining, rec.currency) : 'Amount not set';
+      const dueText = dueDate ? `by ${fmtDateShort(dueDate)}` : 'due date not set';
+      const overdue = dueDate && dueDate < todayISO() ? ' pay-remaining-due-overdue' : '';
+      return `<div class="pay-remaining-due${overdue}">Due: ${amountText} for the remaining portion of the ${label} · ${dueText}</div>`;
     };
     const targetAmountInput = (idx) => `
-      <input type="number" step="0.01" class="pay-mini-input pay-target-input" placeholder="Target total for this payment" value="${p[idx]?.targetAmount ?? ''}" onchange="updatePayColumnTarget('${escapeAttr(rec.id)}',${idx},this.value)">`;
+      <input type="number" step="0.01" class="pay-mini-input pay-target-input" placeholder="Target total for this payment" value="${p[idx]?.targetAmount ?? ''}" onchange="updatePayColumnTarget('${escapeAttr(rec.id)}',${idx},this.value)">
+      <input type="date" class="pay-mini-input pay-target-input pay-target-due-input" title="When this payment is due" value="${escapeAttr(p[idx]?.targetDueDate || '')}" onchange="updatePayColumnDueDate('${escapeAttr(rec.id)}',${idx},this.value)">`;
 
     // Deposit (index 0) — unchanged single date/amount/invoice shape.
     const depositCell = (view) => {
