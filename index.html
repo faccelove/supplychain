@@ -153,6 +153,26 @@
     filter: saturate(0.85);
   }
 
+  /* US-EU Split Inventory/Sales Trackers' US / EU sub-tabs — light golden
+     yellow pills, widely spaced so US owns the left half and EU owns the
+     right half of the bar. */
+  #sub-nav-split, #sub-nav-split-sales {
+    gap: 16px;
+    padding: 14px 48px;
+    justify-content: center;
+  }
+  #sub-nav-split .sub-nav-item, #sub-nav-split-sales .sub-nav-item {
+    flex: 1 1 0;
+    justify-content: center;
+    border: 1px solid var(--gold-border);
+    border-radius: 20px;
+    background: var(--gold-bg);
+    color: #8A6D16;
+    padding: 11px 0;
+  }
+  #sub-nav-split .sub-nav-item:hover, #sub-nav-split-sales .sub-nav-item:hover { background: #FBEEC4; color: #8A6D16; }
+  #sub-nav-split .sub-nav-item.active, #sub-nav-split-sales .sub-nav-item.active { background: var(--gold); color: var(--white); border-color: var(--gold-border); }
+
   main {
     padding: 32px 48px 64px;
     flex: 1;
@@ -1459,6 +1479,8 @@
   .pay-contract-date .pay-instalment-label { margin-right: 6px; }
   .pay-remaining-due { font-size: 10px; color: var(--status-critical); font-weight: 600; margin: 4px 0; line-height: 1.4; }
   .pay-remaining-due-overdue { text-decoration: underline; }
+  .pay-estimated-date { font-size: 10px; color: var(--lavender-deep); font-weight: 600; margin: 4px 0; line-height: 1.4; }
+  .pay-estimated-date-basis { font-size: 9px; color: var(--ink-mute); font-weight: 500; text-transform: none; letter-spacing: 0.02em; }
   .pay-target-input { margin-bottom: 4px; }
   .pay-target-due-input { margin-top: 4px; }
 
@@ -3216,6 +3238,126 @@
     margin-top: 2px;
   }
   .wh-reorder-row-metric-incl strong { color: var(--lavender-deep); font-weight: 700; }
+  /* ============ PAYMENT DUE BANNER (top of Payment Tracker tabs) ============ */
+  .pay-due-banner {
+    margin-bottom: 24px;
+    border: 1px solid var(--lavender);
+    border-radius: var(--radius-lg);
+    background: var(--white);
+    overflow: hidden;
+    transition: all 0.18s ease;
+  }
+  .pay-due-banner.has-attention {
+    border-color: var(--gold-border);
+    background: linear-gradient(135deg, var(--gold-bg) 0%, var(--white) 60%);
+  }
+  .pay-due-banner.all-clear {
+    border-color: var(--status-healthy);
+    background: linear-gradient(135deg, var(--status-healthy-bg) 0%, var(--white) 60%);
+  }
+  .pay-due-banner-summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 18px 24px;
+    display: flex; align-items: center; gap: 14px;
+    user-select: none;
+    transition: background 0.18s ease;
+  }
+  .pay-due-banner-summary::-webkit-details-marker { display: none; }
+  .pay-due-banner-summary:hover { background: rgba(255,255,255,0.4); }
+  .pay-due-banner-icon { font-size: 22px; line-height: 1; flex-shrink: 0; }
+  .pay-due-banner-count {
+    font-size: 32px; font-weight: 700; letter-spacing: -0.01em;
+    color: var(--ink); line-height: 1; flex-shrink: 0;
+  }
+  .pay-due-banner.has-attention .pay-due-banner-count { color: var(--gold-border); }
+  .pay-due-banner.all-clear .pay-due-banner-count { color: var(--status-healthy); }
+  .pay-due-banner-label {
+    font-size: 12px; font-weight: 700; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--ink-soft);
+  }
+  .pay-due-banner-meta {
+    margin-left: auto; font-size: 11px; letter-spacing: 0.06em;
+    color: var(--ink-mute); text-transform: uppercase; flex-shrink: 0;
+  }
+  .pay-due-banner-chevron {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 9px 14px 9px 16px;
+    background: var(--ink); color: var(--white);
+    border-radius: var(--radius);
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase;
+    transition: background 0.18s ease, transform 0.18s ease;
+    flex-shrink: 0; margin-left: 4px;
+    box-shadow: 0 2px 6px rgba(28,28,28,0.18);
+    white-space: nowrap;
+  }
+  .pay-due-banner-summary:hover .pay-due-banner-chevron {
+    background: var(--lavender-deep);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px rgba(28,28,28,0.22);
+  }
+  .pay-due-banner-chevron .chev-arrow { font-size: 13px; line-height: 1; transition: transform 0.2s ease; display: inline-block; }
+  .pay-due-banner[open] .pay-due-banner-chevron .chev-arrow { transform: rotate(180deg); }
+  .pay-due-banner .chev-text-open { display: none; }
+  .pay-due-banner[open] .chev-text-closed { display: none; }
+  .pay-due-banner[open] .chev-text-open { display: inline; }
+  .pay-due-banner-body {
+    padding: 6px 16px 16px;
+    border-top: 1px solid var(--line);
+    background: var(--white);
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .pay-due-empty {
+    padding: 24px 20px; text-align: center;
+    color: var(--ink-mute); font-size: 12px; letter-spacing: 0.04em;
+  }
+  .pay-due-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 8px;
+    border-radius: var(--radius);
+    transition: background 0.15s ease;
+  }
+  .pay-due-row:hover { background: var(--lavender-faint); }
+  .pay-due-row + .pay-due-row { border-top: 1px solid var(--line-soft); }
+  .pay-due-row-badge {
+    flex-shrink: 0;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+    padding: 4px 8px; border-radius: 999px;
+    text-transform: uppercase;
+  }
+  .pay-due-row-badge.badge-US { background: var(--status-pipeline-bg); color: var(--status-pipeline); }
+  .pay-due-row-badge.badge-EU { background: var(--lavender-tint); color: var(--lavender-deep); }
+  .pay-due-row-text { font-size: 13px; color: var(--ink); line-height: 1.4; flex: 1; }
+  .pay-due-row-text strong { font-weight: 700; }
+  .pay-due-row-preview {
+    flex-shrink: 0; cursor: pointer; border: 1.5px solid var(--gold-border);
+    background: var(--gold-bg); color: #8A6D16; border-radius: 20px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.02em;
+    padding: 7px 14px; white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 6px;
+    transition: all 0.15s ease;
+  }
+  .pay-due-row-preview:hover { background: var(--gold); color: var(--white); border-color: var(--gold-border); }
+  .pay-due-row-noinvoice {
+    flex-shrink: 0; font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--ink-mute); white-space: nowrap;
+  }
+  .pay-due-row.overdue { background: var(--status-critical-bg); }
+  .pay-due-row.overdue:hover { background: var(--status-critical-bg); }
+  .pay-due-row-overdue-tag {
+    margin-left: 6px; font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--status-critical);
+  }
+  .pay-due-row-estimate-tag {
+    margin-left: 6px; font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--lavender-deep);
+  }
+  @media (max-width: 720px) {
+    .pay-due-banner-summary { padding: 14px 16px; gap: 10px; flex-wrap: wrap; }
+    .pay-due-banner-meta { width: 100%; margin-left: 0; order: 5; }
+    .pay-due-row { flex-wrap: wrap; }
+  }
+
   @media (max-width: 720px) {
     .wh-reorder-banner-summary { padding: 14px 16px; gap: 10px; flex-wrap: wrap; }
     .wh-reorder-banner-meta { width: 100%; margin-left: 0; order: 5; }
@@ -3883,6 +4025,8 @@
     <button class="nav-item" data-view="sales"><span class="nav-emoji">📈</span> Avg Daily Sales <span class="nav-count" id="nav-count-sales">0</span></button>
     <button class="nav-item" data-view="salesAmazon"><span class="nav-emoji">📦</span> Avg Daily Sales (incl. Amazon)</button>
     <button class="nav-item" data-view="production"><span class="nav-emoji">🏭</span> Current Production <span class="nav-count" id="nav-count-prod">0</span></button>
+    <button class="nav-item" data-view="splitTracker"><span class="nav-emoji">🔀</span> US-EU Split Inventory Tracker</button>
+    <button class="nav-item" data-view="splitSalesTracker"><span class="nav-emoji">🧾</span> US-EU Split Sales Tracker</button>
     <button class="nav-item" data-view="documents"><span class="nav-emoji">📁</span> POs &amp; Invoices <span class="nav-count" id="nav-count-docs">0</span></button>
   </nav>
 </header>
@@ -3900,6 +4044,14 @@
 <nav class="sub-nav" id="sub-nav" style="display:none;">
   <button class="sub-nav-item" data-subview="inProduction"><span class="sub-nav-emoji">⏳</span> In Production <span id="sub-count-ip">0</span></button>
   <button class="sub-nav-item" data-subview="completedProduction"><span class="sub-nav-emoji">✅</span> Completed Production <span id="sub-count-cp">0</span></button>
+</nav>
+<nav class="sub-nav" id="sub-nav-split" style="display:none;">
+  <button class="sub-nav-item" data-subview="splitUS">US Inventory</button>
+  <button class="sub-nav-item" data-subview="splitEU">EU Inventory</button>
+</nav>
+<nav class="sub-nav" id="sub-nav-split-sales" style="display:none;">
+  <button class="sub-nav-item" data-subview="salesUS">US Sales</button>
+  <button class="sub-nav-item" data-subview="salesEU">EU Sales</button>
 </nav>
 <!-- Payment Tracker's 5 sub-tabs render inline (via renderPaymentTrackerSubTabs)
      directly above the table inside the page content, not as a fixed nav bar,
@@ -3955,6 +4107,7 @@
 <input type="file" id="oti-file-input" accept=".pdf,.png,.jpg,.jpeg" hidden>
 <input type="file" id="oti-import-input" accept=".pdf" multiple hidden>
 <input type="file" id="tsv-input" accept=".tsv,.txt,.csv" hidden>
+<input type="file" id="split-import-input" accept=".xlsx,.xls,.tsv,.txt,.csv" hidden>
 
 <!-- TSV date picker modal -->
 <div class="transfer-overlay" id="tsv-date-overlay" style="display:none;">
@@ -3971,6 +4124,94 @@
     <div class="transfer-modal-actions" style="margin-top:24px;">
       <button class="btn btn-ghost" id="tsv-date-cancel">Cancel</button>
       <button class="btn btn-primary" id="tsv-date-confirm">Import</button>
+    </div>
+  </div>
+</div>
+
+<!-- US EU Split Sales Tracker — shared "which date is this for?" modal for
+     all four import buttons (opening inventory, sales, units received,
+     non-store outbound). -->
+<div class="transfer-overlay" id="split-date-overlay" style="display:none;">
+  <div class="transfer-modal" style="max-width:420px;">
+    <h2 id="split-date-title">📅 Which date is this for?</h2>
+    <p id="split-date-desc" style="font-size:13px; color:var(--ink-soft); margin-bottom:20px; line-height:1.6;"></p>
+    <div class="receive-modal-field">
+      <label for="split-date-input" style="font-size:11px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase; color:var(--ink-mute); display:block; margin-bottom:8px;">Date</label>
+      <input type="date" id="split-date-input" style="width:100%; padding:10px 12px; font-family:inherit; font-size:14px; border:1px solid var(--line); border-radius:var(--radius); background:var(--white); color:var(--ink); outline:none;">
+    </div>
+    <div class="receive-modal-field" id="split-category-field" style="display:none; margin-top:14px;">
+      <label for="split-category-input" style="font-size:11px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase; color:var(--ink-mute); display:block; margin-bottom:8px;">Outbound category (applies to all rows in this file)</label>
+      <select id="split-category-input" style="width:100%; padding:10px 12px; font-family:inherit; font-size:14px; border:1px solid var(--line); border-radius:var(--radius); background:var(--white); color:var(--ink); outline:none;">
+        <option value="FBA">✅ FBA (replenishment)</option>
+        <option value="Seeding">✅ Seeding</option>
+        <option value="PR">✅ PR</option>
+        <option value="CS">✅ CS Replacement</option>
+        <option value="Damages">✅ Damages</option>
+      </select>
+    </div>
+    <div id="split-date-meta" style="font-size:12px; color:var(--ink-mute); margin-top:10px; min-height:18px;"></div>
+    <div class="transfer-modal-actions" style="margin-top:24px;">
+      <button class="btn btn-ghost" onclick="closeSplitDateModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmSplitDateModal()">Import</button>
+    </div>
+  </div>
+</div>
+
+<!-- US EU Split Sales Tracker — reconciliation report. Opening balances are
+     never set from the fulfillment partner's file (see getSplitOpeningForSku);
+     this just checks US closing + EU closing against the partner's combined
+     count and surfaces any mismatch, per Sven's reconciliation requirement. -->
+<input type="file" id="split-reconciliation-input" accept=".xlsx,.xls,.tsv,.txt,.csv" hidden>
+<div class="transfer-overlay" id="recon-report-overlay" style="display:none;">
+  <div class="transfer-modal" style="max-width:640px;">
+    <h2>📋 Reconciliation vs Fulfillment Partner</h2>
+    <p id="recon-report-summary" style="font-size:13px; color:var(--ink-soft); margin-bottom:16px; line-height:1.6;"></p>
+    <div style="max-height:50vh; overflow-y:auto; border:1px solid var(--line); border-radius:var(--radius);">
+      <table class="dashboard-table" style="margin:0;">
+        <thead><tr>
+          <th>SKU</th><th class="numeric">Partner Says</th><th class="numeric">Books Say (US + EU)</th><th class="numeric">Diff</th>
+        </tr></thead>
+        <tbody id="recon-report-body"></tbody>
+      </table>
+    </div>
+    <div class="transfer-modal-actions" style="margin-top:24px;">
+      <button class="btn btn-primary" onclick="closeSplitReconciliationReport()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- US EU Split Sales Tracker — "+ Add" popup on a single row's Received cell.
+     Lets Fifi log one dated delivery for one SKU without going through a
+     whole-file import; entries stack (never overwrite), matching the fact a
+     SKU can receive stock more than once in a month. -->
+<div class="transfer-overlay" id="split-receipt-overlay" style="display:none;">
+  <div class="transfer-modal" style="max-width:380px;">
+    <h2 id="split-receipt-title">📦 Add units received</h2>
+    <p id="split-receipt-desc" style="font-size:13px; color:var(--ink-soft); margin-bottom:20px; line-height:1.6;"></p>
+    <div class="receive-modal-field">
+      <label for="split-receipt-qty" style="font-size:11px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase; color:var(--ink-mute); display:block; margin-bottom:8px;">Quantity</label>
+      <input type="number" id="split-receipt-qty" min="0" style="width:100%; padding:10px 12px; font-family:inherit; font-size:14px; border:1px solid var(--line); border-radius:var(--radius); background:var(--white); color:var(--ink); outline:none;">
+    </div>
+    <div class="receive-modal-field" style="margin-top:14px;">
+      <label for="split-receipt-date" style="font-size:11px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase; color:var(--ink-mute); display:block; margin-bottom:8px;">Date received at DayOne</label>
+      <input type="date" id="split-receipt-date" style="width:100%; padding:10px 12px; font-family:inherit; font-size:14px; border:1px solid var(--line); border-radius:var(--radius); background:var(--white); color:var(--ink); outline:none;">
+    </div>
+    <div class="transfer-modal-actions" style="margin-top:24px;">
+      <button class="btn btn-ghost" onclick="closeAddReceiptModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmAddReceiptModal()">Add</button>
+    </div>
+  </div>
+</div>
+
+<!-- US-EU Split Sales Tracker — archive viewer. Read-only snapshot of a
+     completed month's daily-sales grid; opened from the "Archive" list at
+     the bottom of the US Sales / EU Sales tabs. -->
+<div class="transfer-overlay" id="split-sales-archive-overlay" style="display:none;">
+  <div class="transfer-modal" style="max-width:95vw; width:95vw;">
+    <h2 id="split-sales-archive-title">📁 Archived month</h2>
+    <div id="split-sales-archive-body"></div>
+    <div class="transfer-modal-actions" style="margin-top:24px;">
+      <button class="btn btn-primary" onclick="closeArchivedSalesMonth()">Close</button>
     </div>
   </div>
 </div>
@@ -4107,6 +4348,14 @@ let activeOrderSku = null;
 let pendingImportTarget = null;
 let pendingPOFileTarget = null;
 let pendingPhotoTarget = null;
+
+// US EU Split Sales Tracker — transient state. _splitPendingImport holds the
+// parsed rows awaiting date (and, for outbound, category) confirmation in
+// the shared modal. splitTrackerMonth remembers which month each sub-tab
+// (us/eu) is currently viewing — resets to the current month on reload.
+let _splitPendingImport = null;
+let splitTrackerMonth = {};
+let _splitReconciliationStore = null;
 
 // Bulk selection state — only used in BS warehouse view for the "move many to
 // DayOne at once" workflow. Cleared whenever the user navigates away or clicks
@@ -4261,11 +4510,13 @@ function applyRemoteState(parsed) {
     warehouseInventory: { bs: {}, dayone: {} },
     phasedOutWH: [],
     toShipAmazon: [],
+    splitTracker: { us: { openings: {}, receipts: [], sales: [], outbound: [] }, eu: { openings: {}, receipts: [], sales: [], outbound: [] } },
     ...parsed
   };
   if (!Array.isArray(state.phasedOutWH)) state.phasedOutWH = [];
   if (!Array.isArray(state.toShipAmazon)) state.toShipAmazon = [];
   if (!Array.isArray(state.oneTimeInvoices)) state.oneTimeInvoices = [];
+  ensureSplitTracker();
   if (Array.isArray(state.products)) state.products = {};
   state.suppliers.forEach(s => {
     if (!Array.isArray(s.productList)) s.productList = [];
@@ -4333,6 +4584,8 @@ function applyRemoteState(parsed) {
     });
   }
   seedEmbeddedPOData();
+  seedSplitAugustBaseline();
+  fixSplitBaselineDiscrepancy();
   migrateOneTimeInvoices();
 }
 
@@ -4468,6 +4721,12 @@ function seedEmbeddedPOData() {
     if (dep.invoiceDocId === undefined) dep.invoiceDocId = null;
     if (dep.skuAllocations === undefined) dep.skuAllocations = null;
     if (dep.percent === undefined) dep.percent = null;
+    // Invoice-issued vs. actually-paid are separate now — an invoice can be
+    // uploaded before the money has actually moved. Migrate existing rows
+    // that already had an invoice on file to 'paid' (preserving the old
+    // behaviour, where "has an invoice" == "done"); anything without an
+    // invoice yet, or freshly created, starts at 'due'.
+    if (dep.paidStatus !== 'paid' && dep.paidStatus !== 'due') dep.paidStatus = dep.invoiceDocId ? 'paid' : 'due';
 
     // 2nd/3rd (index 1, 2): convert the old flat {date,amount,invoiceDocId}
     // shape into invoices: [{...}] the first time we see it. Once a column
@@ -4477,12 +4736,18 @@ function seedEmbeddedPOData() {
       if (!Array.isArray(p.invoices)) {
         const hadData = p.date || p.amount != null || p.invoiceDocId;
         const migrated = hadData
-          ? [{ id: uid('inv_'), docId: p.invoiceDocId || null, date: p.date || '', amount: p.amount ?? null, skuAllocations: p.skuAllocations ?? null, percent: p.percent ?? null }]
+          ? [{ id: uid('inv_'), docId: p.invoiceDocId || null, date: p.date || '', amount: p.amount ?? null, skuAllocations: p.skuAllocations ?? null, percent: p.percent ?? null, paidStatus: p.invoiceDocId ? 'paid' : 'due' }]
           : [];
         rec.payments[idx] = { invoices: migrated };
       }
       if (rec.payments[idx].targetAmount === undefined) rec.payments[idx].targetAmount = null;
       if (rec.payments[idx].targetDueDate === undefined) rec.payments[idx].targetDueDate = '';
+      // Same invoiced-vs-paid migration for every invoice already sitting
+      // in the list (covers rows that migrated to the `invoices:[]` shape
+      // in an earlier session, before this paid/due flag existed).
+      (rec.payments[idx].invoices || []).forEach(inv => {
+        if (inv.paidStatus !== 'paid' && inv.paidStatus !== 'due') inv.paidStatus = inv.docId ? 'paid' : 'due';
+      });
     });
     // Manual Paid/Due flag for the whole PO row — separate from the
     // auto-computed per-column coverage status, since "has this actually
@@ -5242,9 +5507,1081 @@ function getProductRollup() {
   }).filter(p => !phasedOutSet.has(p.sku));
 }
 
+/* ============================================================
+   US-EU SPLIT INVENTORY / SALES TRACKERS — supporting data +
+   one-time seed helpers. Restored from the older build; see
+   split_main_block.js content below for the tracker engine.
+   ============================================================ */
+const SPLIT_BASELINE_MONTH = '2026-08';
+const EMBEDDED_SPLIT_AUGUST_BASELINE = {"us":{"DPCD2-XD572002":4968,"DPCD2-XD572001":57816,"DHOD2-CC643002":0,"DPCD2-CC644005":0,"DPCD2-CC800001":0,"DPCD2-CC612006":0,"DPCD2-CC612005":0,"DPCD2-CC612004":0,"DPCD2-CC612003":0,"DPCD2-CC644004":0,"DPCD2-CC614005":124,"DPCD2-CC614004":0,"DPCD2-CC613005":0,"DPCD2-CC613004":0,"DPCD2-CC699001":0,"DPCD2-CC651001":0,"DPCD2-CC647001":72,"DPCD2-CC646001":0,"DPCD2-CC645001":0,"DPCD2-CC644003":0,"DPCD2-CC644002":0,"DPCD2-CC644001":0,"DPCD2-CC614003":0,"DPCD2-CC614002":0,"DHOD2-CC643001":0,"DPCD2-CC642001":0,"DPCD2-CC641001":0,"DPCD2-CC640001":0,"DBAD2-CC639001":0,"DPCD2-CC638001":0,"DHOD2-CC628001":0,"DHOD2-CC627001":0,"DPCD2-CC626001":0,"DPCD2-CC625001":0,"DPCD2-CC624001":0,"DPCD2-CC623001":0,"DPCD2-CC622001":0,"DPCD2-CC621001":0,"DPCD2-CC620001":0,"DPCD2-CC619006":0,"DPCD2-CC619005":0,"DPCD2-CC619004":0,"DPCD2-CC619003":0,"DPCD2-CC619002":0,"DPCD2-CC619001":0,"DPCD2-CC618006":0,"DPCD2-CC618005":0,"DPCD2-CC618004":0,"DPCD2-CC618003":0,"DPCD2-CC618002":0,"DPCD2-CC618001":0,"DPCD2-CC617012":0,"DPCD2-CC617011":0,"DPCD2-CC617010":0,"DPCD2-CC617009":0,"DPCD2-CC617008":0,"DPCD2-CC617007":0,"DPCD2-CC617006":0,"DPCD2-CC617005":0,"DPCD2-CC617004":0,"DPCD2-CC617003":0,"DPCD2-CC617002":0,"DPCD2-CC617001":0,"DPCD2-CC616008":0,"DPCD2-CC616007":0,"DPCD2-CC616006":0,"DPCD2-CC616005":0,"DPCD2-CC616004":0,"DPCD2-CC616003":0,"DPCD2-CC616002":0,"DPCD2-CC616001":0,"DPCD2-CC615005":0,"DPCD2-CC615004":0,"DPCD2-CC615003":0,"DPCD2-CC615002":0,"DPCD2-CC615001":0,"DPCD2-CC614001":0,"DPCD2-CC613003":0,"DPCD2-CC613002":0,"DPCD2-CC613001":0,"DPCD2-CC612002":0,"DPCD2-CC612001":0,"DPCD2-CC583001":0,"DPCD2-CC582001":0,"DPCD2-CC581005":0,"DPCD2-CC581004":489,"DPCD2-CC581003":0,"DPCD2-CC581002":0,"DPCD2-CC581001":0,"DPCD2-CC580001":47213,"DPCD2-CC579001":0,"DPCD2-CC578002":0,"DPCD2-CC578001":0,"DPCD2-CC479001":0,"DPCD2-CC305002":0,"DPCD2-CC305001":0},"eu":{"DPCD2-XD572002":3082,"DPCD2-XD572001":61592,"DHOD2-CC643002":25000,"DPCD2-CC644005":415,"DPCD2-CC800001":15183,"DPCD2-CC612006":39,"DPCD2-CC612005":28,"DPCD2-CC612004":73,"DPCD2-CC612003":119,"DPCD2-CC644004":331,"DPCD2-CC614005":95,"DPCD2-CC614004":374,"DPCD2-CC613005":285,"DPCD2-CC613004":146,"DPCD2-CC699001":776,"DPCD2-CC651001":0,"DPCD2-CC647001":0,"DPCD2-CC646001":430,"DPCD2-CC645001":812,"DPCD2-CC644003":478,"DPCD2-CC644002":618,"DPCD2-CC644001":960,"DPCD2-CC614003":39,"DPCD2-CC614002":39,"DHOD2-CC643001":24996,"DPCD2-CC642001":3078,"DPCD2-CC641001":189,"DPCD2-CC640001":100,"DBAD2-CC639001":2,"DPCD2-CC638001":0,"DHOD2-CC628001":281,"DHOD2-CC627001":46,"DPCD2-CC626001":23,"DPCD2-CC625001":0,"DPCD2-CC624001":0,"DPCD2-CC623001":0,"DPCD2-CC622001":2,"DPCD2-CC621001":0,"DPCD2-CC620001":56,"DPCD2-CC619006":30,"DPCD2-CC619005":0,"DPCD2-CC619004":0,"DPCD2-CC619003":0,"DPCD2-CC619002":23,"DPCD2-CC619001":0,"DPCD2-CC618006":83,"DPCD2-CC618005":38,"DPCD2-CC618004":15,"DPCD2-CC618003":0,"DPCD2-CC618002":390,"DPCD2-CC618001":172,"DPCD2-CC617012":2,"DPCD2-CC617011":0,"DPCD2-CC617010":18,"DPCD2-CC617009":0,"DPCD2-CC617008":0,"DPCD2-CC617007":22,"DPCD2-CC617006":32,"DPCD2-CC617005":4,"DPCD2-CC617004":69,"DPCD2-CC617003":0,"DPCD2-CC617002":89,"DPCD2-CC617001":1,"DPCD2-CC616008":0,"DPCD2-CC616007":6,"DPCD2-CC616006":0,"DPCD2-CC616005":3,"DPCD2-CC616004":0,"DPCD2-CC616003":159,"DPCD2-CC616002":0,"DPCD2-CC616001":0,"DPCD2-CC615005":0,"DPCD2-CC615004":0,"DPCD2-CC615003":0,"DPCD2-CC615002":0,"DPCD2-CC615001":28,"DPCD2-CC614001":355,"DPCD2-CC613003":632,"DPCD2-CC613002":51,"DPCD2-CC613001":61,"DPCD2-CC612002":2,"DPCD2-CC612001":36,"DPCD2-CC583001":1706,"DPCD2-CC582001":14081,"DPCD2-CC581005":2445,"DPCD2-CC581004":0,"DPCD2-CC581003":731,"DPCD2-CC581002":1866,"DPCD2-CC581001":2654,"DPCD2-CC580001":21848,"DPCD2-CC579001":747,"DPCD2-CC578002":0,"DPCD2-CC578001":0,"DPCD2-CC479001":7168,"DPCD2-CC305002":63518,"DPCD2-CC305001":5284}};
+
+// One-time seed of August 2026's opening balances for the US EU Split Sales
+// Tracker's two entity books (see EMBEDDED_SPLIT_AUGUST_BASELINE above for
+// the full rationale). Runs once (guarded by state.splitAugustBaselineSeeded);
+// after that these are ordinary editable openings like any other month.
+function seedSplitAugustBaseline() {
+  if (state.splitAugustBaselineSeeded) return;
+  const t = ensureSplitTracker();
+  if (!t.us.openings[SPLIT_BASELINE_MONTH]) t.us.openings[SPLIT_BASELINE_MONTH] = {};
+  if (!t.eu.openings[SPLIT_BASELINE_MONTH]) t.eu.openings[SPLIT_BASELINE_MONTH] = {};
+  Object.entries(EMBEDDED_SPLIT_AUGUST_BASELINE.us).forEach(([sku, qty]) => {
+    if (!(sku in t.us.openings[SPLIT_BASELINE_MONTH])) t.us.openings[SPLIT_BASELINE_MONTH][sku] = qty;
+  });
+  Object.entries(EMBEDDED_SPLIT_AUGUST_BASELINE.eu).forEach(([sku, qty]) => {
+    if (!(sku in t.eu.openings[SPLIT_BASELINE_MONTH])) t.eu.openings[SPLIT_BASELINE_MONTH][sku] = qty;
+  });
+  state.splitAugustBaselineSeeded = true;
+}
+
+// Corrective patch for the two SKUs flagged during initial baseline seeding
+// (DPCD2-CC581004, DPCD2-CC647001). The original US-reported "remaining"
+// counts (550, 76) turned out to be higher than DayOne's confirmed combined
+// count for those SKUs (489, 72) — Fifi confirmed the correct combined totals,
+// so US opening is capped at those confirmed numbers and EU opening stays 0,
+// making book total exactly match DayOne's physical count for both. Runs once
+// (guarded by state.splitBaselineFix2Applied) so it also corrects browsers
+// that already ran seedSplitAugustBaseline() with the old 550/76 values.
+function fixSplitBaselineDiscrepancy() {
+  if (state.splitBaselineFix2Applied) return;
+  const t = ensureSplitTracker();
+  const fixes = { 'DPCD2-CC581004': 489, 'DPCD2-CC647001': 72 };
+  if (t.us.openings[SPLIT_BASELINE_MONTH]) {
+    Object.entries(fixes).forEach(([sku, qty]) => { t.us.openings[SPLIT_BASELINE_MONTH][sku] = qty; });
+  }
+  if (t.eu.openings[SPLIT_BASELINE_MONTH]) {
+    Object.keys(fixes).forEach(sku => { t.eu.openings[SPLIT_BASELINE_MONTH][sku] = 0; });
+  }
+  state.splitBaselineFix2Applied = true;
+}
+
+// Whole-day difference fromISO minus toISO (positive when fromISO is later).
+// Used to map a split-sales entry's date onto the Avg Daily Sales tab's
+// day-offset grid, which is anchored to state.salesAnchorDate.
+function diffDaysISO(fromISO, toISO) {
+  const a = parseDate(fromISO), b = parseDate(toISO);
+  if (!a || !b) return null;
+  return Math.round((a.getTime() - b.getTime()) / 86400000);
+}
+
+/* ============================================================
+   US EU SPLIT SALES TRACKER
+   Two independent per-store (US Store / EU Store) monthly ledgers,
+   per SKU: opening (1st-of-month) + received − sold − other
+   outbound (FBA/seeding/PR/CS/damages) = closing. SKU master list,
+   names and photos are synced live from the DayOne warehouse.
+   Built exactly to spec — no cross-entity reconciliation logic.
+   ============================================================ */
+
+function ensureSplitTracker() {
+  if (!state.splitTracker || typeof state.splitTracker !== 'object') {
+    state.splitTracker = { us: {}, eu: {} };
+  }
+  ['us', 'eu'].forEach(store => {
+    const s = state.splitTracker[store] = (state.splitTracker[store] && typeof state.splitTracker[store] === 'object') ? state.splitTracker[store] : {};
+    if (!s.openings || typeof s.openings !== 'object') s.openings = {};
+    if (!Array.isArray(s.receipts)) s.receipts = [];
+    if (!Array.isArray(s.sales))    s.sales    = [];
+    if (!Array.isArray(s.outbound)) s.outbound = [];
+    // US-EU Split Sales Tracker: which calendar month the daily-sales grid is
+    // currently tracking, and which months have been explicitly marked done
+    // and tucked into the archive. Nothing is ever deleted by archiving —
+    // t.sales keeps every entry forever — this just controls what the active
+    // grid shows vs. what's filed away below it.
+    if (!s.activeSalesMonth) s.activeSalesMonth = splitCurrentMonthKey();
+    if (!Array.isArray(s.completedSalesMonths)) s.completedSalesMonths = [];
+  });
+  return state.splitTracker;
+}
+
+// Master SKU list for the tracker's tables — synced from the DayOne
+// warehouse (customized + whitelabel; packaging isn't a sellable SKU, same
+// exclusion used elsewhere e.g. getCombinedWarehouseReorder).
+function getSplitTrackerSkuList() {
+  const dayo = ensureWHWarehouse('dayone');
+  const map = new Map();
+  ['customized', 'whitelabel'].forEach(sec => {
+    (dayo[sec] || []).forEach(item => {
+      const sku = String(item.sku || '').trim();
+      if (!sku) return;
+      if (!map.has(sku)) map.set(sku, { sku, name: item.name || sku, photo: item.photo || '' });
+      else {
+        const e = map.get(sku);
+        if (!e.name && item.name) e.name = item.name;
+        if (!e.photo && item.photo) e.photo = item.photo;
+      }
+    });
+  });
+  return Array.from(map.values()).sort((a, b) => a.sku.localeCompare(b.sku));
+}
+
+function splitMonthKey(iso) { return String(iso || '').slice(0, 7); } // 'YYYY-MM'
+function splitCurrentMonthKey() { return todayISO().slice(0, 7); }
+function fmtMonthLabel(monthKey) {
+  const parts = String(monthKey || '').split('-').map(Number);
+  if (parts.length < 2 || !parts[0] || !parts[1]) return monthKey || '—';
+  const d = new Date(parts[0], parts[1] - 1, 1);
+  return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+}
+
+// Every month that has any data at all for this store, plus the current
+// month, so the filter always has somewhere sensible to land.
+function getSplitAvailableMonths(store) {
+  const t = ensureSplitTracker()[store];
+  const set = new Set(Object.keys(t.openings));
+  [...t.receipts, ...t.sales, ...t.outbound].forEach(r => set.add(splitMonthKey(r.date)));
+  set.add(splitCurrentMonthKey());
+  return Array.from(set).filter(Boolean).sort();
+}
+
+function getSplitSelectedMonth(store) {
+  const months = getSplitAvailableMonths(store);
+  if (!splitTrackerMonth[store] || !months.includes(splitTrackerMonth[store])) {
+    splitTrackerMonth[store] = splitCurrentMonthKey();
+  }
+  return splitTrackerMonth[store];
+}
+
+function setSplitMonth(store, monthKey) {
+  splitTrackerMonth[store] = monthKey;
+  render();
+}
+
+// Resolves one SKU's opening balance for a given store + month. An explicit
+// value stored in t.openings[monthKey][sku] always wins (that's how the
+// one-time baseline month gets seeded, and how a manual correction to any
+// later month sticks). Otherwise it carries forward from the PREVIOUS
+// month's computed closing — exactly like a real accounting ledger, so
+// nothing needs to be re-synced or re-imported every month. If there's no
+// earlier month at all, opening defaults to 0.
+function getSplitOpeningForSku(store, sku, monthKey) {
+  const t = ensureSplitTracker()[store];
+  const explicit = t.openings[monthKey];
+  if (explicit && Object.prototype.hasOwnProperty.call(explicit, sku)) {
+    return +explicit[sku] || 0;
+  }
+  const priorMonths = getSplitAvailableMonths(store).filter(m => m < monthKey);
+  if (!priorMonths.length) return 0;
+  const prevMonth = priorMonths[priorMonths.length - 1];
+  const prevOpening = getSplitOpeningForSku(store, sku, prevMonth);
+  const sumInMonth = (arr) => arr
+    .filter(r => r.sku === sku && splitMonthKey(r.date) === prevMonth)
+    .reduce((sum, r) => sum + (+r.qty || 0), 0);
+  const received = sumInMonth(t.receipts);
+  const sold     = sumInMonth(t.sales);
+  const outbound = sumInMonth(t.outbound);
+  return prevOpening + received - sold - outbound;
+}
+
+// Per-SKU ledger for one store + month: opening + received − sold − outbound = closing.
+function computeSplitLedger(store, monthKey) {
+  const t = ensureSplitTracker()[store];
+  const skus = getSplitTrackerSkuList();
+
+  const sumBySku = (arr) => {
+    const m = new Map();
+    arr.forEach(r => {
+      if (splitMonthKey(r.date) !== monthKey) return;
+      m.set(r.sku, (m.get(r.sku) || 0) + (+r.qty || 0));
+    });
+    return m;
+  };
+  const receivedBySku = sumBySku(t.receipts);
+  const soldBySku     = sumBySku(t.sales);
+  const outboundBySku = sumBySku(t.outbound);
+
+  // Every individual dated delivery per SKU within the selected month (not
+  // just the summed total) — powers the Received column's "100 pcs · 🚚 Aug 1"
+  // style list, since a SKU can receive stock more than once in a month.
+  const receiptEntriesBySku = new Map();
+  t.receipts.forEach(r => {
+    if (splitMonthKey(r.date) !== monthKey) return;
+    if (!receiptEntriesBySku.has(r.sku)) receiptEntriesBySku.set(r.sku, []);
+    receiptEntriesBySku.get(r.sku).push({ id: r.id, date: r.date, qty: +r.qty || 0 });
+  });
+  receiptEntriesBySku.forEach(list => list.sort((a, b) => a.date.localeCompare(b.date)));
+
+  return skus.map(p => {
+    const open     = getSplitOpeningForSku(store, p.sku, monthKey);
+    const received = receivedBySku.get(p.sku) || 0;
+    const sold     = soldBySku.get(p.sku) || 0;
+    const outbound = outboundBySku.get(p.sku) || 0;
+    return {
+      sku: p.sku, name: p.name, photo: p.photo,
+      receiptEntries: receiptEntriesBySku.get(p.sku) || [],
+      opening: open, received, sold, outbound,
+      closing: open + received - sold - outbound
+    };
+  });
+}
+
+// SKUs that have ever ACTUALLY had US-entity stock — either a nonzero
+// opening (including the one-time August baseline) in any month, or at
+// least one logged delivery in t.us.receipts. Deliberately does NOT look at
+// t.us.sales: a SKU can be sold in the US store with zero US stock behind it
+// (that's exactly the EU-crossover case), and a sale alone doesn't mean the
+// US entity ever owned any of this SKU — if it never received US inventory,
+// it stays out of the US Inventory tab entirely, full stop.
+function getUsEverReceivedSkuSet() {
+  const t = ensureSplitTracker().us;
+  const set = new Set();
+  Object.values(t.openings).forEach(monthObj => {
+    Object.entries(monthObj || {}).forEach(([sku, qty]) => { if (+qty > 0) set.add(sku); });
+  });
+  t.receipts.forEach(r => { if (+r.qty > 0) set.add(r.sku); });
+  return set;
+}
+
+// Walks every dated receipt/sale/outbound event for one SKU+store+month in
+// chronological order, starting from that month's opening balance, and
+// returns every contiguous stretch where the running balance dips below
+// zero. A negative running balance can only mean this store's own book was
+// empty and sales kept going — i.e. those units were physically fulfilled
+// from the OTHER entity's inventory. This is Sven's crossover signal,
+// computed automatically instead of requiring manual tracking, and it
+// naturally supports more than one period per month (a dip, a restock, then
+// another dip later).
+function getSplitCrossoverStreaks(store, sku, monthKey) {
+  const t = ensureSplitTracker()[store];
+  const byDate = new Map(); // date -> { received, sold, outbound }
+  const addEvents = (arr, key) => arr.forEach(r => {
+    if (r.sku !== sku || splitMonthKey(r.date) !== monthKey) return;
+    if (!byDate.has(r.date)) byDate.set(r.date, { received: 0, sold: 0, outbound: 0 });
+    byDate.get(r.date)[key] += (+r.qty || 0);
+  });
+  addEvents(t.receipts, 'received');
+  addEvents(t.sales, 'sold');
+  addEvents(t.outbound, 'outbound');
+
+  const dates = Array.from(byDate.keys()).sort();
+  let running = getSplitOpeningForSku(store, sku, monthKey);
+  const streaks = [];
+  let current = null;
+  dates.forEach(date => {
+    const ev = byDate.get(date);
+    const availableAtStart = running + ev.received; // receipts applied before that day's sales/outbound
+    const depletion = ev.sold + ev.outbound;
+    const shortfall = availableAtStart >= 0 ? Math.max(0, depletion - availableAtStart) : depletion;
+    running = availableAtStart - depletion;
+    if (running < 0 && shortfall > 0) {
+      if (!current) current = { start: date, end: date, qty: 0 };
+      current.end = date;
+      current.qty += shortfall;
+    } else if (running >= 0 && current) {
+      streaks.push(current);
+      current = null;
+    }
+  });
+  if (current) { current.ongoing = true; streaks.push(current); }
+  return streaks;
+}
+
+// Default row order for the ledger table. EU just ranks by highest sales.
+// US ranks by highest sales too, but only among SKUs that actually have US
+// received stock this month — SKUs with zero US received stock sink to the
+// bottom regardless of sales, since a sale with no received stock behind it
+// usually signals a data gap worth noticing.
+function defaultSplitSort(rows, store) {
+  const arr = rows.slice();
+  if (store === 'us') {
+    arr.sort((a, b) => {
+      const aHas = a.received > 0 ? 1 : 0;
+      const bHas = b.received > 0 ? 1 : 0;
+      if (aHas !== bHas) return bHas - aHas;
+      return b.sold - a.sold;
+    });
+  } else {
+    arr.sort((a, b) => b.sold - a.sold);
+  }
+  return arr;
+}
+
+function renderSplitTracker(store) {
+  ensureSplitTracker();
+  const monthKey = getSplitSelectedMonth(store);
+  const months   = getSplitAvailableMonths(store);
+  let rows       = computeSplitLedger(store, monthKey);
+
+  // US Store only shows SKUs that have ever actually had US-entity stock —
+  // the other ~90 EU-only SKUs would just be permanent zero rows otherwise.
+  const isFiltered = store === 'us';
+  if (isFiltered) {
+    const everUS = getUsEverReceivedSkuSet();
+    rows = rows.filter(r => everUS.has(r.sku));
+  }
+  rows = defaultSplitSort(rows, store);
+
+  const storeLabel = store === 'us' ? 'US Inventory' : 'EU Inventory';
+  const storeUpper = store.toUpperCase();
+  const otherLabel  = store === 'us' ? 'EU' : 'US';
+
+  const monthOptions = months.map(m =>
+    `<option value="${escapeAttr(m)}" ${m === monthKey ? 'selected' : ''}>${escapeHtml(fmtMonthLabel(m))}</option>`
+  ).join('');
+
+  const rowsHtml = rows.map(r => {
+    const photo = r.photo
+      ? `<img src="${escapeAttr(r.photo)}" alt="" style="width:36px;height:36px;object-fit:cover;border-radius:6px;flex-shrink:0;">`
+      : `<div style="width:36px;height:36px;border-radius:6px;background:var(--lavender-pale);flex-shrink:0;"></div>`;
+
+    const streaks = getSplitCrossoverStreaks(store, r.sku, monthKey);
+    const crossoverQty = streaks.reduce((s, x) => s + x.qty, 0);
+    // If the most recent streak is still open, the SKU is *currently* being
+    // fulfilled from the other entity — show the crossover pill(s) as-is.
+    // Once stock has arrived and the streak has closed, the SKU is back on
+    // its own inventory now — lead with that, and keep the closed streak(s)
+    // as a dimmed historical note underneath rather than implying it's still
+    // ongoing.
+    const isOngoingNow = streaks.length > 0 && streaks[streaks.length - 1].ongoing;
+    const fmtStreakRange = (s) => s.start === s.end ? fmtDateDisplay(s.start) : `${fmtDateDisplay(s.start)} – ${fmtDateDisplay(s.end)}`;
+    const statusHtml = isOngoingNow
+      ? streaks.map(s => {
+          const label = s.ongoing ? `Currently using ${otherLabel} sales` : `Used ${otherLabel} sales`;
+          return `<div style="display:inline-block; margin:2px 0; padding:3px 9px; border-radius:999px; background:var(--gold-bg); border:1px solid var(--gold-border); color:var(--gold-border); font-size:11px; font-weight:600; white-space:nowrap;">
+            ${label} — sold ${fmtNum(s.qty)} pcs from ${otherLabel} · ${fmtStreakRange(s)}
+          </div>`;
+        }).join('<br>')
+      : (streaks.length
+          ? `<div style="display:inline-block; margin:2px 0; padding:3px 9px; border-radius:999px; background:var(--gold-bg); border:1px solid var(--gold-border); color:var(--gold-border); font-size:11px; font-weight:600; white-space:nowrap;">
+              Currently using ${storeUpper} inventory
+            </div>` +
+            streaks.map(s => `<div style="font-size:11px; color:var(--ink-mute); margin-top:3px;">${fmtStreakRange(s)}: used ${fmtNum(s.qty)} pcs from ${otherLabel}</div>`).join('')
+          : `<span style="color:var(--status-healthy); font-size:12px; font-weight:600;">Currently using ${storeUpper} inventory</span>`);
+    const statusTitle = isOngoingNow
+      ? `${storeUpper} book stock hit zero and sales kept going — those units were physically fulfilled from ${otherLabel} inventory. This is the trigger Sven flagged for an accounting adjustment between entities.`
+      : (streaks.length
+          ? `${storeUpper} stock has arrived and this SKU is back on its own inventory. Earlier this month, ${storeUpper} book stock briefly hit zero and sales kept going — those units were physically fulfilled from ${otherLabel} inventory.`
+          : `This SKU is being fulfilled entirely from its own ${storeUpper} inventory this month — no ${otherLabel} crossover.`);
+
+    const receiptListHtml = r.receiptEntries.length
+      ? r.receiptEntries.map(e => `
+          <div style="white-space:nowrap; font-size:12px; color:var(--status-healthy); display:flex; align-items:center; gap:4px;">
+            <span>+${fmtNum(e.qty)} pcs · 🚚 ${escapeHtml(fmtDateDisplay(e.date))}</span>
+            <button class="split-receipt-delete" data-store="${store}" data-id="${escapeAttr(e.id)}" title="Remove this delivery" style="border:none;background:none;cursor:pointer;color:var(--ink-mute);font-size:11px;padding:0;">✕</button>
+          </div>`).join('')
+      : `<span style="color:var(--ink-mute)">—</span>`;
+
+    // "This entity's own inventory out" excludes whatever was actually
+    // covered by the crossover — sold+outbound is the TOTAL that left DayOne
+    // for this SKU, and crossoverQty is the slice of that total which was
+    // physically the other entity's stock, not this one's.
+    const totalDepletion = r.sold + r.outbound;
+    const thisOut = Math.max(0, totalDepletion - crossoverQty);
+    const outHtml = `
+      <div style="font-size:12px; line-height:1.6; white-space:nowrap;">
+        <div>${storeUpper} inventory out for the month: <strong>${fmtNum(thisOut)}</strong></div>
+        <div style="color:${crossoverQty > 0 ? 'var(--gold-border)' : 'var(--ink-mute)'};">${otherLabel} inventory out in the ${storeUpper} store: <strong>${fmtNum(crossoverQty)}</strong></div>
+      </div>`;
+
+    return `<tr>
+      <td class="product-cell">
+        <div style="display:flex; align-items:center; gap:10px;">
+          ${photo}
+          <div>
+            <div style="font-weight:600;">${escapeHtml(r.sku)}</div>
+            <div style="font-size:12px; color:var(--ink-mute);">${escapeHtml(r.name)}</div>
+          </div>
+        </div>
+      </td>
+      <td data-sort-value="${crossoverQty}" title="${escapeAttr(statusTitle)}">${statusHtml}</td>
+      <td class="numeric" data-sort-value="${r.opening}">
+        <input type="number" class="split-opening-edit" data-store="${store}" data-sku="${escapeAttr(r.sku)}" data-month="${escapeAttr(monthKey)}" value="${r.opening}" style="width:76px;text-align:right;padding:4px 6px;border:1px solid var(--line);border-radius:var(--radius);background:var(--white);font-family:inherit;font-size:13px;color:var(--ink);">
+      </td>
+      <td class="numeric" data-sort-value="${r.received}">
+        ${receiptListHtml}
+        <button class="btn btn-ghost" style="margin-top:4px;padding:2px 8px;font-size:11px;" onclick="openAddReceiptModal('${store}', '${escapeAttr(r.sku)}')">+ Add</button>
+      </td>
+      <td class="numeric" data-sort-value="${r.sold}" style="color:var(--status-critical);">${r.sold ? '−' + fmtNum(r.sold) : '—'}</td>
+      <td class="numeric" data-sort-value="${r.outbound}" style="color:var(--status-reorder);">${r.outbound ? '−' + fmtNum(r.outbound) : '—'}</td>
+      <td class="numeric" data-sort-value="${r.closing}"><strong>${fmtNum(r.closing)}</strong></td>
+      <td data-sort-value="${thisOut + crossoverQty}">${outHtml}</td>
+      <td data-label=""><button class="row-delete" onclick="deleteSplitRow('${store}', '${escapeAttr(r.sku)}')" title="Remove this SKU's data for ${escapeAttr(fmtMonthLabel(monthKey))}">${trashIconSVG()}</button></td>
+    </tr>`;
+  }).join('');
+
+  const emptyMsg = isFiltered
+    ? `No US-received SKUs yet for ${escapeAttr(fmtMonthLabel(monthKey))} — use "+ Add" on a row, or Import Units Received, once the first US delivery arrives.`
+    : `No SKUs found in the DayOne warehouse yet — add products under Warehouse first.`;
+
+  return `
+    <div class="page-header">
+      <h1 class="page-title">${storeLabel} — US-EU Split Inventory Tracker</h1>
+      <p class="page-subtitle">Per-SKU monthly ledger for the ${storeLabel} · opening + received − sold − other outflows = closing · SKUs, names &amp; photos sync live from the DayOne warehouse${isFiltered ? ' · showing only SKUs that have ever had US-entity stock' : ''}</p>
+    </div>
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px;">
+      <label for="split-month-${store}" style="font-size:11px; font-weight:600; letter-spacing:0.1em; text-transform:uppercase; color:var(--ink-mute);">Month</label>
+      <select id="split-month-${store}" onchange="setSplitMonth('${store}', this.value)" style="padding:8px 12px; border:1px solid var(--line); border-radius:var(--radius); background:var(--white); font-family:inherit; font-size:13px; color:var(--ink);">
+        ${monthOptions}
+      </select>
+    </div>
+    <div class="table-wrap">
+      <table class="dashboard-table sortable-table">
+        <thead><tr>
+          <th>SKU</th><th>Status</th>
+          <th class="numeric">Opening</th><th class="numeric">Received</th><th class="numeric is-sorted-desc">Sold</th>
+          <th class="numeric">Other Outflows</th><th class="numeric">Closing</th><th>Total Inventory Out for the Month</th><th class="no-sort"></th>
+        </tr></thead>
+        <tbody>${rowsHtml || `<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--ink-mute)">${emptyMsg}</td></tr>`}</tbody>
+      </table>
+    </div>
+    <div class="action-bar" style="margin-top:32px; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+      <button class="btn" onclick="triggerSplitImport('receipts', '${store}')">📦 Import Units Received (${storeUpper})</button>
+      <button class="btn" onclick="triggerSplitImport('outbound', '${store}')">🚛 Import Non-Store Outbound (${storeUpper})</button>
+      <button class="btn btn-ghost" onclick="downloadSplitImportTemplate()" title="A blank spreadsheet with just SKU + Quantity columns, pre-filled with every SKU tracked here — fill in the numbers and use it with the Units Received or Non-Store Outbound import buttons above.">⬇ Download Template (SKU + Qty)</button>
+      <button class="btn btn-ghost" onclick="triggerSplitReconciliation('${store}')" title="Import the fulfillment partner's combined Stock Forecast export (the same file the Warehouse tab's Sync from Fulfillment Partner reads) and check it against US closing + EU closing for ${escapeAttr(fmtMonthLabel(monthKey))}. Opening balances are never set from this file — they carry forward automatically month to month.">📋 Check Reconciliation vs Fulfillment Partner</button>
+    </div>
+    <p style="margin-top:10px; font-size:11px; color:var(--ink-mute); line-height:1.6;">
+      Opening balance carries forward from last month's closing automatically — type directly into the Opening column only to fix a one-off error · Sold comes automatically from the ${storeUpper} Sales tab · use "+ Add" on any row to log a new dated delivery — you can add more than one per month.
+    </p>`;
+}
+
+// Simple, generic template for the Sales / Units Received / Non-Store
+// Outbound imports (the ones that just need "SKU" + a quantity column) —
+// pre-filled with every SKU currently tracked so all that's left to do is
+// type in the numbers. The opening-inventory sync deliberately isn't
+// covered here since it mirrors the Warehouse tab's own fulfillment-partner
+// export shape (SKU + Stock Forecast) instead of a plain qty column.
+function downloadSplitImportTemplate() {
+  const skus = getSplitTrackerSkuList();
+  if (!skus.length) { toast('No SKUs found in the DayOne warehouse yet — add products under Warehouse first.'); return; }
+  const headers = ['SKU', 'Product Name', 'Quantity', 'Date'];
+  const rows = skus.map(p => [p.sku, p.name || '', '', '']);
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  ws['!cols'] = [{ wch: 24 }, { wch: 36 }, { wch: 14 }, { wch: 14 }];
+  ws['!freeze'] = { xSplit: 0, ySplit: 1 };
+  XLSX.utils.book_append_sheet(wb, ws, 'Template');
+  XLSX.writeFile(wb, 'facelove-split-tracker-import-template.xlsx');
+  toast(`Template downloaded · ${skus.length} SKU${skus.length === 1 ? '' : 's'} — fill in Quantity (and Date, e.g. 2026-08-04, if rows differ) then use it with any of the Sales / Units Received / Outbound import buttons.`);
+}
+
+// Removes one SKU's data for the store/month currently being viewed —
+// opening balance, plus any sales/receipts/outbound rows dated within that
+// month. Scoped to a single store's month so deleting a row on the US tab
+// never touches the EU ledger.
+function deleteSplitRow(store, sku) {
+  const monthKey = getSplitSelectedMonth(store);
+  if (!confirm(`Remove all ${store.toUpperCase()} Store data for ${sku} in ${fmtMonthLabel(monthKey)}? This clears opening, received, sold and outbound entries for this SKU in this month only.`)) return;
+  const t = ensureSplitTracker()[store];
+  if (t.openings[monthKey]) delete t.openings[monthKey][sku];
+  t.receipts = t.receipts.filter(r => !(r.sku === sku && splitMonthKey(r.date) === monthKey));
+  t.sales    = t.sales.filter(r => !(r.sku === sku && splitMonthKey(r.date) === monthKey));
+  t.outbound = t.outbound.filter(r => !(r.sku === sku && splitMonthKey(r.date) === monthKey));
+  saveState();
+  render();
+  toast(`Removed ${sku} · ${fmtMonthLabel(monthKey)}`);
+}
+
+// ---- "+ Add" single-row receipt popup (Received column) ----
+// Lets Fifi log one dated delivery for one SKU without going through a
+// whole-file import. Entries stack in t[store].receipts — never overwritten —
+// so a SKU that receives stock more than once in a month keeps every entry.
+let _addReceiptCtx = null; // { store, sku }
+
+function openAddReceiptModal(store, sku) {
+  _addReceiptCtx = { store, sku };
+  const p = getSplitTrackerSkuList().find(x => x.sku === sku);
+  document.getElementById('split-receipt-title').textContent = `📦 Add units received — ${sku}`;
+  document.getElementById('split-receipt-desc').textContent =
+    `Logs a new dated delivery of ${p ? p.name : sku} into the ${store.toUpperCase()} Store book. This adds a new entry — it never overwrites an earlier delivery, so add another any time a new shipment arrives.`;
+  document.getElementById('split-receipt-qty').value = '';
+  document.getElementById('split-receipt-date').value = todayISO();
+  document.getElementById('split-receipt-overlay').style.display = 'flex';
+  document.getElementById('split-receipt-qty').focus();
+}
+
+function closeAddReceiptModal() {
+  _addReceiptCtx = null;
+  document.getElementById('split-receipt-overlay').style.display = 'none';
+}
+
+function confirmAddReceiptModal() {
+  if (!_addReceiptCtx) { closeAddReceiptModal(); return; }
+  const qty = Math.round(toNum(document.getElementById('split-receipt-qty').value));
+  const iso = document.getElementById('split-receipt-date').value;
+  if (!qty || qty <= 0) { toast('Enter a quantity greater than 0'); return; }
+  if (!iso) { toast('Pick a date'); return; }
+  const { store, sku } = _addReceiptCtx;
+  const t = ensureSplitTracker()[store];
+  t.receipts.push({ id: uid('spl_'), date: iso, sku, qty });
+  splitTrackerMonth[store] = splitMonthKey(iso);
+  saveState();
+  closeAddReceiptModal();
+  render();
+  toast(`Logged +${fmtNum(qty)} received · ${sku} · ${fmtDateDisplay(iso)}`);
+}
+
+function deleteSplitReceiptEntry(store, id) {
+  const t = ensureSplitTracker()[store];
+  const entry = t.receipts.find(r => r.id === id);
+  if (!entry) return;
+  if (!confirm(`Remove this ${fmtNum(entry.qty)}-unit delivery (${fmtDateDisplay(entry.date)}) for ${entry.sku}?`)) return;
+  t.receipts = t.receipts.filter(r => r.id !== id);
+  saveState();
+  render();
+  toast('Removed delivery entry');
+}
+
+/* ============================================================
+   US SALES / EU SALES TABS
+   Day-grid view (mirrors the Avg Daily Sales tab's layout) over the SAME
+   underlying data the Split Tracker's "Sold" column already reads —
+   t[store].sales, a flat list of {id, date, sku, qty}. There's no separate
+   data model to keep in sync: editing a cell here, or importing a TSV here,
+   is exactly what feeds Sold on the ${store} Store ledger automatically.
+   ============================================================ */
+function getStoreSalesValue(store, sku, dateISO) {
+  const t = ensureSplitTracker()[store];
+  return t.sales.filter(r => r.sku === sku && r.date === dateISO).reduce((s, r) => s + (+r.qty || 0), 0);
+}
+
+// Overwrite semantics for one day's cell (like the Avg Daily Sales grid) —
+// clears any existing entries for that SKU+date, then adds one entry back
+// with the new number (or none, if qty is 0/blank).
+function setStoreSalesValue(store, sku, dateISO, qty) {
+  const t = ensureSplitTracker()[store];
+  t.sales = t.sales.filter(r => !(r.sku === sku && r.date === dateISO));
+  if (qty > 0) t.sales.push({ id: uid('spl_'), date: dateISO, sku, qty });
+}
+
+function getDaysInMonth(monthKey) {
+  const [y, m] = String(monthKey).split('-').map(Number);
+  return new Date(y, m, 0).getDate(); // day 0 of next month = last day of this month
+}
+
+// Every calendar day of the given month, from the 1st through either the
+// last day of the month (past months) or today (the current month, so no
+// empty future columns show up).
+function getMonthDayCols(monthKey) {
+  const [y, m] = String(monthKey).split('-').map(Number);
+  const lastDay = monthKey === splitCurrentMonthKey() ? new Date().getDate() : getDaysInMonth(monthKey);
+  const cols = [];
+  for (let d = 1; d <= lastDay; d++) {
+    cols.push(`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
+  }
+  return cols;
+}
+
+// Every month that has ANY sales entries logged, regardless of whether it's
+// been explicitly archived — so data never goes missing from view just
+// because "Completed Month's Sales" wasn't clicked for it.
+function getSplitSalesMonthsWithData(store) {
+  const t = ensureSplitTracker()[store];
+  const set = new Set();
+  t.sales.forEach(r => set.add(splitMonthKey(r.date)));
+  return set;
+}
+
+// Files the active month away into the archive and moves the grid on to the
+// next calendar month. Purely organizational — t.sales keeps every entry
+// forever, so the Inventory tracker's Sold column and the archive viewer
+// both still see this month's numbers exactly as before.
+function completeSalesMonth(store) {
+  const t = ensureSplitTracker()[store];
+  const monthKey = t.activeSalesMonth;
+  if (!confirm(`Mark ${fmtMonthLabel(monthKey)} as complete for ${store.toUpperCase()} Sales?\n\nIt moves to the archive below — nothing is deleted, and you can reopen it anytime. New sales will start tracking under the next month.`)) return;
+  if (!t.completedSalesMonths.includes(monthKey)) t.completedSalesMonths.push(monthKey);
+  t.completedSalesMonths.sort();
+  const [y, m] = monthKey.split('-').map(Number);
+  const next = new Date(y, m, 1); // JS month is 0-based, so month index `m` here IS next month
+  t.activeSalesMonth = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`;
+  saveState();
+  render();
+  toast(`${fmtMonthLabel(monthKey)} archived · now tracking ${fmtMonthLabel(t.activeSalesMonth)}`);
+}
+
+let _viewingSalesArchive = null; // { store, monthKey }
+
+function openArchivedSalesMonth(store, monthKey) {
+  _viewingSalesArchive = { store, monthKey };
+  document.getElementById('split-sales-archive-title').textContent = `📁 ${store.toUpperCase()} Sales — ${fmtMonthLabel(monthKey)}`;
+  document.getElementById('split-sales-archive-body').innerHTML = renderSalesMonthGridHTML(store, monthKey, { readOnly: true });
+  document.getElementById('split-sales-archive-overlay').style.display = 'flex';
+}
+
+function closeArchivedSalesMonth() {
+  _viewingSalesArchive = null;
+  document.getElementById('split-sales-archive-overlay').style.display = 'none';
+}
+
+// Shared table-building logic for one store+month, used by both the live
+// active-month grid (editable) and the archive viewer (read-only snapshot).
+function renderSalesMonthGridHTML(store, monthKey, opts) {
+  const readOnly = !!(opts && opts.readOnly);
+  const dayCols = getMonthDayCols(monthKey);
+  const headerCells = dayCols.map(iso => {
+    const { num, mon } = fmtDayHeader(iso);
+    return `<th class="numeric date-col"><span class="day-num">${num}</span><span class="day-month">${mon}</span></th>`;
+  }).join('');
+
+  const catalog = getSplitTrackerSkuList();
+  const nameBySku = new Map(catalog.map(p => [p.sku, p.name]));
+  // US Sales shows SKUs that have ever had real US-entity stock (same strict
+  // rule as the US Inventory tab), PLUS any SKU that already has a US sale
+  // logged here — otherwise a SKU imported via "Import US Sales (TSV)" with
+  // zero US inventory behind it (a pure EU-crossover case) would vanish from
+  // every tab with no way to see or edit what was just imported.
+  let skuList = catalog.map(p => p.sku);
+  if (store === 'us') {
+    const everUS = getUsEverReceivedSkuSet();
+    const loggedUsSales = new Set(ensureSplitTracker().us.sales.map(r => r.sku));
+    skuList = skuList.filter(sku => everUS.has(sku) || loggedUsSales.has(sku));
+  }
+
+  const totalsBySku = skuList.map(sku => {
+    let total = 0;
+    dayCols.forEach(iso => { total += getStoreSalesValue(store, sku, iso); });
+    return { sku, total };
+  }).filter(r => !readOnly || r.total > 0) // archive view: skip rows with nothing logged that month
+    .sort((a, b) => b.total - a.total);
+
+  const rowsHtml = totalsBySku.map(({ sku, total }) => {
+    const name = nameBySku.get(sku) || sku;
+    const cells = dayCols.map(iso => {
+      const val = getStoreSalesValue(store, sku, iso);
+      if (readOnly) {
+        return `<td class="numeric date-col" data-label="${dayLabel(iso)}">${val || '—'}</td>`;
+      }
+      return `<td class="numeric date-col" data-label="${dayLabel(iso)}">
+        <input type="number" inputmode="decimal" class="store-sales-edit" data-store="${store}" data-sku="${escapeAttr(sku)}" data-date="${iso}"
+               value="${val || ''}" placeholder="0" onclick="this.select()"
+               style="width:100%;text-align:right;">
+      </td>`;
+    }).join('');
+    const ads = dayCols.length ? total / dayCols.length : 0;
+    return `<tr>
+      <td class="product-cell" data-label="Product">${escapeHtml(name)}</td>
+      ${cells}
+      <td class="numeric ads-cell" data-label="ADS"><strong>${ads.toFixed(1)}</strong></td>
+    </tr>`;
+  }).join('');
+
+  const emptyMsg = readOnly
+    ? `No sales were logged for ${escapeHtml(fmtMonthLabel(monthKey))}.`
+    : store === 'us'
+      ? `No US-received SKUs yet — once the first US delivery is logged on the US Inventory tab, its sales row will appear here.`
+      : `No SKUs found in the DayOne warehouse yet — add products under Warehouse first.`;
+
+  return `
+    <div class="table-wrap">
+      <table class="sales-table sortable-table">
+        <thead><tr>
+          <th>Product</th>${headerCells}
+          <th class="numeric ads-cell">ADS</th>
+        </tr></thead>
+        <tbody>${rowsHtml || `<tr><td colspan="${dayCols.length + 2}" style="text-align:center;padding:32px;color:var(--ink-mute)">${emptyMsg}</td></tr>`}</tbody>
+      </table>
+    </div>`;
+}
+
+function renderStoreSalesTab(store) {
+  const t = ensureSplitTracker()[store];
+  const activeMonth = t.activeSalesMonth;
+  const storeLabel = store === 'us' ? 'US Sales' : 'EU Sales';
+  const storeUpper = store.toUpperCase();
+
+  const archiveMonths = new Set(t.completedSalesMonths);
+  getSplitSalesMonthsWithData(store).forEach(m => { if (m !== activeMonth) archiveMonths.add(m); });
+  const archiveList = Array.from(archiveMonths).sort().reverse();
+
+  const archiveHtml = archiveList.length
+    ? archiveList.map(m => `
+        <button class="btn btn-ghost" style="margin:4px 6px 4px 0;" onclick="openArchivedSalesMonth('${store}', '${m}')">
+          📁 ${escapeHtml(fmtMonthLabel(m))}
+        </button>`).join('')
+    : `<span style="font-size:12px; color:var(--ink-mute);">No completed months yet — once you click "Completed Month's Sales" below, it'll show up here.</span>`;
+
+  return `
+    <div class="page-header">
+      <h1 class="page-title">${storeLabel} — US-EU Split Sales Tracker</h1>
+      <p class="page-subtitle">Daily unit sales for the ${storeUpper} Store, ${fmtMonthLabel(activeMonth)} · feeds the "Sold" column on the ${storeUpper} Inventory tab and the combined Avg Daily Sales tab automatically</p>
+    </div>
+    <div class="formula-hint">
+      <div class="formula-hint-text"><strong>Tip:</strong> click a cell to type that day's units sold, or import a whole day's file at once. Showing ${escapeHtml(fmtMonthLabel(activeMonth))} only — mark it complete below once the month wraps up.</div>
+    </div>
+    ${renderSalesMonthGridHTML(store, activeMonth, { readOnly: false })}
+    <div class="action-bar" style="margin-top:32px; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+      <button class="btn" onclick="triggerSplitImport('sales', '${store}')">📥 Import ${storeUpper} Sales (TSV)</button>
+      <button class="btn btn-ghost" onclick="completeSalesMonth('${store}')" title="Archives ${escapeAttr(fmtMonthLabel(activeMonth))} below and starts tracking the next month. Nothing is deleted.">✅ Completed Month's Sales</button>
+    </div>
+    <p style="margin-top:10px; font-size:11px; color:var(--ink-mute); line-height:1.6;">
+      Editing a cell here or importing a file overwrites that SKU's total for that day (matches however many sales entries you'd logged for it) — it feeds straight into the ${storeUpper} Inventory ledger's Sold column, no separate step needed.
+    </p>
+    <div class="page-header" style="margin-top:36px;">
+      <h2 style="font-size:16px; margin:0;">📁 Archive</h2>
+      <p class="page-subtitle" style="margin-top:4px;">Completed months — click any one to reopen its grid.</p>
+    </div>
+    <div>${archiveHtml}</div>`;
+}
+
+// Keeps the combined Avg Daily Sales tab's state.sales in sync with the two
+// split-store sales logs, WITHOUT touching or discarding any day that has no
+// US/EU Sales data yet (i.e. all pre-existing history entered before this
+// feature existed stays exactly as imported). For any date that has at least
+// one entry in either store's sales log, the combined value for that
+// SKU+date becomes US + EU — overriding whatever was there before for that
+// specific day only.
+function recomputeCombinedSales() {
+  const t = ensureSplitTracker();
+  const splitDates = new Set();
+  t.us.sales.forEach(r => splitDates.add(r.date));
+  t.eu.sales.forEach(r => splitDates.add(r.date));
+  if (!splitDates.size) return;
+
+  const anchor = state.salesAnchorDate || todayISO();
+  const derived = new Map(); // date -> Map(sku -> qty)
+  const addIn = (arr) => arr.forEach(r => {
+    if (!derived.has(r.date)) derived.set(r.date, new Map());
+    const m = derived.get(r.date);
+    m.set(r.sku, (m.get(r.sku) || 0) + (+r.qty || 0));
+  });
+  addIn(t.us.sales);
+  addIn(t.eu.sales);
+
+  if (!Array.isArray(state.sales)) state.sales = [];
+  const catalog = new Map(getSplitTrackerSkuList().map(p => [p.sku, p.name]));
+  const bySku = new Map(state.sales.map(s => [s.sku, s]));
+
+  splitDates.forEach(dateISO => {
+    const offset = diffDaysISO(anchor, dateISO);
+    if (offset === null || offset < 0 || offset >= SALES_DAYS_MAX) return; // outside the rolling window shown anywhere
+    const m = derived.get(dateISO);
+    m.forEach((qty, sku) => {
+      let entry = bySku.get(sku);
+      if (!entry) {
+        entry = { sku, name: catalog.get(sku) || sku, values: new Array(SALES_DAYS_MAX).fill(0), restocks: new Array(SALES_DAYS_MAX).fill(0) };
+        bySku.set(sku, entry);
+        state.sales.push(entry);
+      }
+      if (!Array.isArray(entry.values)) entry.values = new Array(SALES_DAYS_MAX).fill(0);
+      entry.values[offset] = qty;
+    });
+  });
+}
+
+function triggerSplitImport(type, store) {
+  _splitPendingImport = { type, store, rows: null };
+  document.getElementById('split-import-input').click();
+}
+
+function normalizeOutboundCategory(v) {
+  const s = String(v || '').trim().toLowerCase();
+  if (/fba/.test(s))            return 'FBA';
+  if (/seed/.test(s))           return 'Seeding';
+  if (/^pr\b|press/.test(s))    return 'PR';
+  if (/\bcs\b|replace/.test(s)) return 'CS';
+  if (/damag/.test(s))          return 'Damages';
+  return '';
+}
+
+// Strips a leading UTF-8 BOM (common in "CSV UTF-8" exports from Excel /
+// fulfillment-partner portals — without this, the very first header cell
+// silently fails every regex test and the whole file gets rejected) and any
+// surrounding quotes a spreadsheet export may have wrapped each cell in.
+function cleanSplitCell(s) {
+  return String(s || '').replace(/^﻿/, '').trim().replace(/^"(.*)"$/, '$1').trim();
+}
+
+// SKU / Quantity header matchers for the Sales / Units Received / Non-Store
+// Outbound imports. Broadened beyond exact "SKU" / "Quantity" so real
+// fulfillment-partner and ERP exports work without renaming columns first —
+// e.g. "ERP SKU" (matches on the word "SKU") and "汇总" (Chinese for
+// "total/summary", commonly used as the quantity column in ERP exports).
+function isSplitSkuHeader(h) {
+  return /\bsku\b/i.test(String(h || '').trim());
+}
+function isSplitQtyHeader(h) {
+  const s = String(h || '').trim();
+  return /\b(qty|quantity|units|sales|sold|received)\b/i.test(s) || /(汇总|合计|总计)/.test(s);
+}
+// Optional per-row date column — when present (e.g. "Date", "Received Date"),
+// each row can carry its own date instead of one date applying to the whole
+// file. Rows missing a value here fall back to whatever's picked in the
+// shared date modal.
+function isSplitDateHeader(h) {
+  return /\bdate\b/i.test(String(h || '').trim());
+}
+
+// ---- Reconciliation vs the fulfillment partner's combined stock file ----
+// The partner only ever reports ONE combined number per SKU (no US/EU
+// split — Fifi confirmed this), so this file is never used to set either
+// entity's opening balance. It's purely a check: does US closing + EU
+// closing (per the ledger, which carries forward automatically month to
+// month) match what the partner says is actually sitting in the warehouse?
+// Reads the same "sku" + "Stock Forecast" shape as the Warehouse tab's
+// "🚚 Sync from Fulfillment Partner" (see importPartnerStock), plus a
+// looser CSV/TSV fallback.
+function triggerSplitReconciliation(store) {
+  _splitReconciliationStore = store;
+  document.getElementById('split-reconciliation-input').click();
+}
+
+function parseSplitReconciliationFile(file, store) {
+  const isExcel = /\.(xlsx|xls)$/i.test(file.name || '');
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const pairs = [];
+      if (isExcel) {
+        const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
+        if (!rows.length) { toast('Sheet is empty'); return; }
+        const headers = Object.keys(rows[0]);
+        const norm = h => String(h || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        let skuCol = null, qtyCol = null;
+        headers.forEach(h => {
+          const n = norm(h);
+          if (!skuCol && (n === 'sku' || n === 'partnersku' || n === 'productcode' || n === 'itemcode')) skuCol = h;
+          if (!qtyCol && (n === 'stockforecast' || n === 'forecast' || n === 'forecaststock')) qtyCol = h;
+        });
+        if (!skuCol) { toast(`Could not find a "SKU" column in the file — found: ${headers.join(', ')}`); return; }
+        if (!qtyCol) { toast(`Could not find a "Stock Forecast" column in the file — found: ${headers.join(', ')}`); return; }
+        rows.forEach(r => {
+          const sku = String(r[skuCol] || '').trim();
+          if (!sku) return;
+          pairs.push({ sku, qty: Math.max(0, Math.round(toNum(r[qtyCol]))) });
+        });
+      } else {
+        const text = String(e.target.result || '').replace(/^﻿/, '');
+        const lines = text.split(/\r?\n/).filter(l => l.trim());
+        if (lines.length < 2) { toast('File is empty or has no data rows'); return; }
+        const delim = lines[0].includes('\t') ? '\t' : ',';
+        const headers = lines[0].split(delim).map(cleanSplitCell);
+        const skuIdx = headers.findIndex(h => /^sku$/i.test(h));
+        if (skuIdx === -1) { toast(`File must have a "SKU" column — found: ${headers.join(', ')}`); return; }
+        const norm = h => String(h || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        let qtyIdx = headers.findIndex(h => ['stockforecast', 'forecast', 'forecaststock'].includes(norm(h)));
+        if (qtyIdx === -1) qtyIdx = headers.findIndex(h => /\b(qty|quantity|units)\b/i.test(h));
+        if (qtyIdx === -1) { toast(`Could not find a "Stock Forecast" or "Qty" column — found: ${headers.join(', ')}`); return; }
+        for (let i = 1; i < lines.length; i++) {
+          const cols = lines[i].split(delim).map(cleanSplitCell);
+          const sku = cols[skuIdx] || '';
+          if (!sku) continue;
+          const qty = parseInt(String(cols[qtyIdx] || '').replace(/,/g, ''), 10);
+          if (isNaN(qty)) continue;
+          pairs.push({ sku, qty: Math.max(0, qty) });
+        }
+      }
+      if (!pairs.length) { toast('No valid rows found in file'); return; }
+      showSplitReconciliationReport(store, pairs);
+    } catch (err) {
+      console.error(err);
+      toast('Could not read that file');
+    }
+  };
+  if (isExcel) reader.readAsArrayBuffer(file); else reader.readAsText(file);
+}
+
+function showSplitReconciliationReport(store, pairs) {
+  const monthKey = getSplitSelectedMonth(store);
+  const usRows = computeSplitLedger('us', monthKey);
+  const euRows = computeSplitLedger('eu', monthKey);
+  const usClosingBySku = new Map(usRows.map(r => [r.sku, r.closing]));
+  const euClosingBySku = new Map(euRows.map(r => [r.sku, r.closing]));
+  const nameBySku = new Map(usRows.map(r => [r.sku, r.name]));
+
+  const results = pairs.map(p => {
+    const usC = usClosingBySku.get(p.sku) || 0;
+    const euC = euClosingBySku.get(p.sku) || 0;
+    const books = usC + euC;
+    return { sku: p.sku, name: nameBySku.get(p.sku) || p.sku, partner: p.qty, books, diff: p.qty - books };
+  }).sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
+
+  const mismatches = results.filter(r => r.diff !== 0);
+
+  document.getElementById('recon-report-summary').textContent =
+    `${fmtMonthLabel(monthKey)} · ${results.length - mismatches.length} of ${results.length} SKUs match exactly` +
+    (mismatches.length ? ` · ${mismatches.length} mismatch${mismatches.length === 1 ? '' : 'es'} found — something wasn't logged` : ' · all clear');
+
+  document.getElementById('recon-report-body').innerHTML = results.map(r => `
+    <tr>
+      <td>${escapeHtml(r.sku)}<div style="font-size:11px;color:var(--ink-mute);">${escapeHtml(r.name)}</div></td>
+      <td class="numeric">${fmtNum(r.partner)}</td>
+      <td class="numeric">${fmtNum(r.books)}</td>
+      <td class="numeric" style="font-weight:700; color:${r.diff === 0 ? 'var(--status-healthy)' : 'var(--status-critical)'};">${r.diff === 0 ? '✓' : (r.diff > 0 ? '+' : '') + fmtNum(r.diff)}</td>
+    </tr>`).join('');
+
+  document.getElementById('recon-report-overlay').style.display = 'flex';
+}
+
+function closeSplitReconciliationReport() {
+  document.getElementById('recon-report-overlay').style.display = 'none';
+}
+
+// Reads the simple "SKU" + "Quantity" (+ optional "Category" for outbound)
+// Excel template from downloadSplitImportTemplate() — used by the Sales /
+// Units Received / Non-Store Outbound imports whenever the file is a real
+// .xlsx/.xls rather than a TSV/CSV.
+function parseSplitGenericExcel(file, type, store) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const data = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
+      if (!data.length) { toast('Sheet is empty'); return; }
+      const headers = Object.keys(data[0]);
+      const skuCol = headers.find(isSplitSkuHeader);
+      if (!skuCol) { toast(`File must have a "SKU" column — found: ${headers.join(', ')}`); return; }
+      const qtyCol = headers.find(isSplitQtyHeader);
+      if (!qtyCol) { toast(`File must have a "Quantity" column — found: ${headers.join(', ')}`); return; }
+      const dateCol = headers.find(isSplitDateHeader);
+      const catCol = type === 'outbound' ? headers.find(h => /\b(category|type|reason)\b/i.test(String(h))) : null;
+
+      const rows = [];
+      data.forEach(r => {
+        const sku = String(r[skuCol] || '').trim();
+        const raw = r[qtyCol];
+        if (!sku || raw === '' || raw === null || raw === undefined) return; // blank template rows for untouched SKUs
+        const qty = Math.max(0, Math.round(toNum(raw)));
+        const row = { sku, qty };
+        if (dateCol) {
+          const iso = excelDateToISO(r[dateCol]);
+          if (iso) row.date = iso;
+        }
+        if (type === 'outbound' && catCol) row.category = normalizeOutboundCategory(r[catCol]);
+        rows.push(row);
+      });
+      if (!rows.length) { toast('No valid rows found in file — fill in the Quantity column for the SKUs you want to import'); return; }
+      openSplitDateModal(type, store, rows);
+    } catch (err) {
+      console.error(err);
+      toast('Could not read that Excel file');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function parseSplitImportFile(file, type, store) {
+  // Sales / Units Received / Non-Store Outbound files can all be a real
+  // .xlsx/.xls — those need SheetJS, not plain-text line splitting.
+  if (/\.(xlsx|xls)$/i.test(file.name || '')) {
+    parseSplitGenericExcel(file, type, store);
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const text = String(e.target.result || '').replace(/^﻿/, '');
+      const lines = text.split(/\r?\n/).filter(l => l.trim());
+      if (lines.length < 2) { toast('File is empty or has no data rows'); return; }
+      const delim = lines[0].includes('\t') ? '\t' : ',';
+      const headers = lines[0].split(delim).map(cleanSplitCell);
+      const skuIdx = headers.findIndex(isSplitSkuHeader);
+      if (skuIdx === -1) { toast(`File must have a "SKU" column — found: ${headers.join(', ') || '(no headers read)'}`); return; }
+
+      const qtyIdx = headers.findIndex(isSplitQtyHeader);
+      if (qtyIdx === -1) { toast(`File must have a "Qty" column — found: ${headers.join(', ')}`); return; }
+      const dateIdx = headers.findIndex(isSplitDateHeader);
+      const catIdx = type === 'outbound' ? headers.findIndex(h => /\b(category|type|reason)\b/i.test(h)) : -1;
+
+      const rows = [];
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(delim).map(cleanSplitCell);
+        const sku = cols[skuIdx] || '';
+        const qty = parseInt(String(cols[qtyIdx] || '').replace(/,/g, ''), 10);
+        if (!sku || isNaN(qty)) continue;
+        const row = { sku, qty: Math.max(0, qty) };
+        if (dateIdx !== -1) {
+          const iso = excelDateToISO(cols[dateIdx]);
+          if (iso) row.date = iso;
+        }
+        if (type === 'outbound' && catIdx !== -1) row.category = normalizeOutboundCategory(cols[catIdx]);
+        rows.push(row);
+      }
+      if (!rows.length) { toast('No valid rows found in file'); return; }
+      openSplitDateModal(type, store, rows);
+    } catch (err) {
+      console.error(err);
+      toast('Failed to parse file');
+    }
+  };
+  reader.readAsText(file);
+}
+
+function openSplitDateModal(type, store, rows) {
+  _splitPendingImport = { type, store, rows };
+  const storeUpper = store === 'both' ? '' : store.toUpperCase() + ' Store ';
+  const titles = {
+    sales:    '📅 Which date are these sales for?',
+    receipts: '📦 Which date were these units received at DayOne?',
+    outbound: '🚛 Which date did these units leave DayOne?'
+  };
+  const descs = {
+    sales:    `This will deduct these sales from the ${storeUpper}table for the selected day.`,
+    receipts: `This will add these units to the ${storeUpper}table as a new dated delivery per SKU — earlier deliveries for the same SKU aren't overwritten.`,
+    outbound: `This will deduct these units from the ${storeUpper}table as non-store outbound stock (FBA / seeding / PR / CS / damages).`
+  };
+  const needsCategory = type === 'outbound' && !rows.every(r => r.category);
+  const rowsWithOwnDate = rows.filter(r => r.date).length;
+
+  // If every row already carries its own Date column value (and, for
+  // outbound, its own category), there's nothing left to ask — apply
+  // straight away using each row's date instead of popping the modal.
+  if (rowsWithOwnDate === rows.length && !needsCategory) {
+    applySplitImport(type, store, rows, null, null);
+    return;
+  }
+
+  document.getElementById('split-date-title').textContent = titles[type] || 'Which date is this for?';
+  document.getElementById('split-date-desc').textContent  = descs[type] || '';
+  document.getElementById('split-category-field').style.display = needsCategory ? 'block' : 'none';
+
+  const input = document.getElementById('split-date-input');
+  input.value = todayISO();
+  document.getElementById('split-date-meta').textContent = rowsWithOwnDate > 0
+    ? `${rowsWithOwnDate} of ${rows.length} row${rows.length === 1 ? '' : 's'} already have their own Date column — this date is only used as a fallback for the rest.`
+    : `${rows.length} SKU${rows.length === 1 ? '' : 's'} in this file.`;
+  document.getElementById('split-date-overlay').style.display = 'flex';
+  input.focus();
+}
+
+function closeSplitDateModal() {
+  _splitPendingImport = null;
+  document.getElementById('split-date-overlay').style.display = 'none';
+}
+
+function confirmSplitDateModal() {
+  const iso = document.getElementById('split-date-input').value;
+  if (!iso) { toast('Please select a date'); return; }
+  if (!_splitPendingImport || !_splitPendingImport.rows) { closeSplitDateModal(); return; }
+  const { type, store, rows } = _splitPendingImport;
+  const categorySel = document.getElementById('split-category-input').value;
+  applySplitImport(type, store, rows, iso, categorySel);
+  closeSplitDateModal();
+}
+
+function applySplitImport(type, store, rows, iso, categorySel) {
+  const t = ensureSplitTracker();
+  const bucket = type === 'sales' ? t[store].sales : type === 'receipts' ? t[store].receipts : t[store].outbound;
+  let lastMonthKey = null;
+  rows.forEach(r => {
+    // Each row's own Date column value wins when the file provided one;
+    // otherwise fall back to the date picked in the shared modal.
+    const rowDate = r.date || iso;
+    if (!rowDate) return; // no per-row date and no fallback picked — skip rather than mis-date it
+    const entry = { id: uid('spl_'), date: rowDate, sku: r.sku, qty: r.qty };
+    if (type === 'outbound') entry.category = r.category || categorySel || 'Other';
+    bucket.push(entry);
+    lastMonthKey = splitMonthKey(rowDate);
+  });
+  if (lastMonthKey) splitTrackerMonth[store] = lastMonthKey;
+  saveState();
+  render();
+  const verb = type === 'sales' ? 'sales row' : type === 'receipts' ? 'units-received row' : 'non-store outbound row';
+  const usedOwnDates = rows.some(r => r.date);
+  const dateLabel = usedOwnDates
+    ? (rows.every(r => r.date) ? 'using each row\'s own date' : `using each row's own date where given, ${iso} otherwise`)
+    : iso;
+  toast(`Imported ${rows.length} ${verb}${rows.length === 1 ? '' : 's'} for ${store.toUpperCase()} Store · ${dateLabel}`);
+}
+
+
 /* ---------- Routing ---------- */
 function setView(view) {
   if (view === 'production') view = 'inProduction';
+  if (view === 'splitTracker') view = 'splitUS';
+  if (view === 'splitSalesTracker') view = 'salesUS';
   // Growth Projection, Product Details, Suppliers, and Product Dev were
   // removed as tabs (and their data deleted) — redirect any old bookmark or
   // saved view state to a view that still exists instead of rendering blank.
@@ -5274,22 +6611,31 @@ function setView(view) {
   currentView = view;
   const subNav   = document.getElementById('sub-nav');
   const subNavWH = document.getElementById('sub-nav-wh');
+  const subNavSplit = document.getElementById('sub-nav-split');
+  const subNavSplitSales = document.getElementById('sub-nav-split-sales');
   const isProd = (view === 'inProduction' || view === 'completedProduction');
   const isWH   = (view === 'inventoryBS' || view === 'inventoryDayOne' || view === 'phasedOutWH' || view === 'toShipAmazon' || view === 'shippedOutAmazon');
   const isPay  = (view === 'usInvoices' || view === 'euInvoices' || view === 'complianceInvoices' || view === 'inspectionInvoices' || view === 'sampleProductionInvoices'
     || view === 'usInvoicesArchive' || view === 'euInvoicesArchive' || view === 'complianceInvoicesArchive' || view === 'inspectionInvoicesArchive' || view === 'sampleProductionInvoicesArchive');
+  const isSplit = (view === 'splitUS' || view === 'splitEU');
+  const isSplitSales = (view === 'salesUS' || view === 'salesEU');
   subNav.style.display   = isProd ? 'flex' : 'none';
   subNavWH.style.display = isWH   ? 'flex' : 'none';
+  subNavSplit.style.display = isSplit ? 'flex' : 'none';
+  subNavSplitSales.style.display = isSplitSales ? 'flex' : 'none';
   document.querySelectorAll('.nav-item').forEach(b => {
     let isActive = b.dataset.view === view;
     if (b.dataset.view === 'production' && isProd) isActive = true;
     if (b.dataset.view === 'warehouse'  && isWH)   isActive = true;
     if (b.dataset.view === 'paymentSchedule' && isPay) isActive = true;
+    if (b.dataset.view === 'splitTracker' && isSplit) isActive = true;
+    if (b.dataset.view === 'splitSalesTracker' && isSplitSales) isActive = true;
     b.classList.toggle('active', isActive);
   });
   document.querySelectorAll('.sub-nav-item').forEach(b => {
     b.classList.toggle('active', b.dataset.subview === view);
   });
+  recomputeCombinedSales();
   render();
 }
 
@@ -5318,6 +6664,10 @@ function render() {
   else if (currentView === 'inspectionInvoicesArchive')   main.innerHTML = renderOneTimeInvoices('inspection', true);
   else if (currentView === 'sampleProductionInvoicesArchive') main.innerHTML = renderOneTimeInvoices('sampleProduction', true);
   else if (currentView === 'productionSchedule')   main.innerHTML = renderProductionSchedule();
+  else if (currentView === 'splitUS')              main.innerHTML = renderSplitTracker('us');
+  else if (currentView === 'splitEU')              main.innerHTML = renderSplitTracker('eu');
+  else if (currentView === 'salesUS')              main.innerHTML = renderStoreSalesTab('us');
+  else if (currentView === 'salesEU')              main.innerHTML = renderStoreSalesTab('eu');
   // Update reorder banner above sub-nav (only visible on warehouse views)
   const onWarehouse = currentView === 'inventoryBS' || currentView === 'inventoryDayOne';
   updateWarehouseReorderBanner(onWarehouse); // banner only makes sense on the active-stock views, not Phased Out
@@ -9749,6 +11099,50 @@ function attachInlineHandlers() {
     });
   });
 
+  // US EU Split Sales Tracker — manual override of a SKU's opening balance.
+  // Normally opening carries forward automatically from last month's
+  // closing (see getSplitOpeningForSku); typing here stores an explicit
+  // override for that store+month+SKU which always takes precedence.
+  document.querySelectorAll('.split-opening-edit[data-sku]').forEach(el => {
+    el.addEventListener('change', () => {
+      const store = el.dataset.store;
+      const sku = el.dataset.sku;
+      const monthKey = el.dataset.month;
+      const t = ensureSplitTracker()[store];
+      if (!t.openings[monthKey]) t.openings[monthKey] = {};
+      const val = el.value === '' ? 0 : +el.value;
+      t.openings[monthKey][sku] = val;
+      saveState();
+      render();
+      toast(`Opening balance for ${sku} set to ${fmtNum(val)} · ${store.toUpperCase()} Store · ${fmtMonthLabel(monthKey)}`);
+    });
+  });
+
+  // Split Sales Tracker — remove one dated delivery entry from the Received
+  // column's list (the "✕" next to "+123 pcs · 🚚 Aug 1").
+  document.querySelectorAll('.split-receipt-delete[data-id]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.preventDefault();
+      deleteSplitReceiptEntry(el.dataset.store, el.dataset.id);
+    });
+  });
+
+  // US Sales / EU Sales tabs — editing a day cell overwrites that SKU's
+  // total for that date in t[store].sales, same overwrite semantics as the
+  // combined Avg Daily Sales grid. This directly feeds the Split Tracker's
+  // Sold column and the auto-derived combined Avg Daily Sales tab.
+  document.querySelectorAll('.store-sales-edit[data-sku]').forEach(el => {
+    el.addEventListener('change', () => {
+      const store = el.dataset.store;
+      const sku = el.dataset.sku;
+      const dateISO = el.dataset.date;
+      const qty = el.value === '' ? 0 : Math.max(0, Math.round(+el.value || 0));
+      setStoreSalesValue(store, sku, dateISO, qty);
+      saveState();
+      render();
+    });
+  });
+
   // PO-level fields (only in edit mode)
   document.querySelectorAll('[data-po-id][data-po-field]').forEach(el => {
     el.addEventListener('change', () => {
@@ -11952,7 +13346,7 @@ function findOrCreatePayRecord(poNumber) {
       currency: 'RMB',
       paymentTerms: '',
       payments: [
-        { date: '', amount: null, invoiceDocId: null, skuAllocations: null, percent: null },
+        { date: '', amount: null, invoiceDocId: null, skuAllocations: null, percent: null, paidStatus: 'due' },
         { invoices: [], targetAmount: null, targetDueDate: '' },
         { invoices: [], targetAmount: null, targetDueDate: '' }
       ],
@@ -11973,10 +13367,14 @@ function findOrCreatePayRecord(poNumber) {
     ];
   }
   if (rec.payments[0].invoiceDocId === undefined) rec.payments[0].invoiceDocId = null;
+  if (rec.payments[0].paidStatus !== 'paid' && rec.payments[0].paidStatus !== 'due') rec.payments[0].paidStatus = rec.payments[0].invoiceDocId ? 'paid' : 'due';
   [1, 2].forEach(idx => {
     if (!Array.isArray(rec.payments[idx].invoices)) rec.payments[idx].invoices = [];
     if (rec.payments[idx].targetAmount === undefined) rec.payments[idx].targetAmount = null;
     if (rec.payments[idx].targetDueDate === undefined) rec.payments[idx].targetDueDate = '';
+    rec.payments[idx].invoices.forEach(inv => {
+      if (inv.paidStatus !== 'paid' && inv.paidStatus !== 'due') inv.paidStatus = inv.docId ? 'paid' : 'due';
+    });
   });
   return rec;
 }
@@ -12062,8 +13460,38 @@ function getSkuInstalmentBreakdown(rec, li) {
 // rows without a file attached don't count — a typed-in date/amount alone
 // isn't treated as paid. If the PO has no matching Production line items to
 // check coverage against, falls back to 'logged' rather than guessing.
+// ---- Estimated payment dates (before any invoice exists) ----
+// Once an invoice is actually logged, its real date takes over everywhere
+// else in the UI — these are only ever shown as a placeholder guess for a
+// column that's still empty, so Fifi/Sven know roughly when to expect it.
+const SECOND_PAYMENT_LEAD_DAYS = 38;  // contract/order date -> estimated 2nd payment
+const THIRD_PAYMENT_LAG_DAYS = 30;    // 2nd payment date -> estimated 3rd payment
+
+function getEstimatedSecondPaymentDate(rec) {
+  if (!rec.orderDate || !parseDate(rec.orderDate)) return null;
+  return addDaysISO(rec.orderDate, SECOND_PAYMENT_LEAD_DAYS);
+}
+
+// The anchor the 3rd-payment estimate counts 30 days from — prefers a real
+// logged 2nd-payment invoice date over the 38-day guess once one exists.
+function getSecondPaymentAnchorDate(rec) {
+  const loggedDates = (rec.payments?.[1]?.invoices || []).map(inv => inv.date).filter(Boolean).sort();
+  if (loggedDates.length) return { date: loggedDates[loggedDates.length - 1], isEstimate: false };
+  const est = getEstimatedSecondPaymentDate(rec);
+  return { date: est, isEstimate: !!est };
+}
+
+function getEstimatedThirdPaymentDate(rec) {
+  const anchor = getSecondPaymentAnchorDate(rec);
+  if (!anchor.date) return null;
+  return addDaysISO(anchor.date, THIRD_PAYMENT_LAG_DAYS);
+}
+
 function getPayColumnStatus(rec, idx, lineItems) {
-  const invoices = (rec.payments?.[idx]?.invoices || []).filter(inv => inv.docId);
+  // Only invoices that are actually marked paid count toward coverage — an
+  // uploaded-but-unpaid invoice means the money hasn't moved yet, so the
+  // amount stays "due" (and keeps showing in the payment-due banner).
+  const invoices = (rec.payments?.[idx]?.invoices || []).filter(inv => inv.docId && inv.paidStatus === 'paid');
   if (!invoices.length) return null;
   if (!lineItems.length) return 'logged';
   if (invoices.some(inv => !Array.isArray(inv.skuAllocations))) return 'full'; // one invoice tagged "All SKUs"
@@ -12081,7 +13509,7 @@ function getPayColumnStatus(rec, idx, lineItems) {
 // payment at all), in which case it stops at "Fully Paid" after the 2nd.
 function getPayLifecycleStatus(rec, lineItems) {
   const dep = rec.payments?.[0];
-  const depositPaid = !!(dep && dep.invoiceDocId);
+  const depositPaid = !!(dep && dep.invoiceDocId && dep.paidStatus === 'paid');
   if (!depositPaid) return { label: 'Next Due: Deposit', tone: 'due' };
 
   const status2 = getPayColumnStatus(rec, 1, lineItems);
@@ -12258,7 +13686,7 @@ function updatePayColumnDueDate(recId, idx, value) {
 function addPayInvoice(recId, idx) {
   const rec = findPayRecord(recId); if (!rec) return;
   if (!Array.isArray(rec.payments[idx].invoices)) rec.payments[idx].invoices = [];
-  rec.payments[idx].invoices.push({ id: uid('inv_'), docId: null, date: '', amount: null, skuAllocations: null, percent: null });
+  rec.payments[idx].invoices.push({ id: uid('inv_'), docId: null, date: '', amount: null, skuAllocations: null, percent: null, paidStatus: 'due' });
   saveState(); render();
 }
 function removePayInvoice(recId, idx, invId) {
@@ -12269,6 +13697,23 @@ function removePayInvoice(recId, idx, invId) {
 }
 function findPayInvoice(rec, idx, invId) {
   return (rec.payments?.[idx]?.invoices || []).find(inv => inv.id === invId);
+}
+
+// Invoice-issued vs. actually-paid are tracked separately: uploading a file
+// just means the invoice exists, this flag is what says the money moved.
+// Toggled independently for the deposit (a single slot) and for each
+// individual invoice inside a 2nd/3rd payment column.
+function togglePayDepositPaidStatus(recId) {
+  const rec = findPayRecord(recId); if (!rec) return;
+  const dep = rec.payments[0];
+  dep.paidStatus = dep.paidStatus === 'paid' ? 'due' : 'paid';
+  saveState(); render();
+}
+function togglePayInvoicePaidStatus(recId, idx, invId) {
+  const rec = findPayRecord(recId); if (!rec) return;
+  const inv = findPayInvoice(rec, idx, invId); if (!inv) return;
+  inv.paidStatus = inv.paidStatus === 'paid' ? 'due' : 'paid';
+  saveState(); render();
 }
 
 function setPaySkuAll(recId, idx, invId, checked) {
@@ -12576,6 +14021,174 @@ function renderPaySkuBreakdown(rec, lineItems) {
     </div>`;
 }
 
+// ---- Payment-due notification banner (top of Payment Tracker tabs) ----
+// Scans every active (non-archived) PO's 2nd/3rd payment columns for a
+// contractual due date (targetDueDate) that falls within the current
+// calendar month and isn't fully paid yet. Shown across both US and EU
+// sub-tabs since a payment due date doesn't care which tab you're on.
+const PAY_COLUMN_LABEL = { 1: '2nd', 2: '3rd' };
+
+// Best-guess amount for a 2nd/3rd payment column when nothing's been typed
+// in yet, so the banner always has a number to show rather than "—":
+//   2nd payment  -> defaults to the deposit amount (most contracts split
+//                   deposit and 2nd payment evenly, e.g. 30%/30%)
+//   3rd payment  -> defaults to whatever's left of the PO's total after the
+//                   deposit and the (possibly-defaulted) 2nd payment
+// Falls back to null if there isn't enough information to guess.
+function getEffectiveColumnTarget(rec, idx) {
+  const p = rec.payments?.[idx];
+  if (p?.targetAmount != null) return p.targetAmount;
+  const dep = rec.payments?.[0];
+  if (idx === 1) return dep?.amount ?? null;
+  if (idx === 2 && !rec.twoInstalmentOnly && rec.totalAmount != null) {
+    const depAmt = dep?.amount ?? 0;
+    const secondEffective = getEffectiveColumnTarget(rec, 1) ?? 0;
+    const remainder = rec.totalAmount - depAmt - secondEffective;
+    return remainder > 0 ? remainder : null;
+  }
+  return null;
+}
+
+// An uploaded invoice and an actually-paid invoice are different things —
+// this scans for money still owed regardless of which stage it's stuck at:
+// no invoice yet (target/due date typed in), or invoice issued but not yet
+// marked paid. Either way it belongs in the "needs payment this month" list.
+function getPaymentsDueThisMonth() {
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth();
+  const today = todayISO();
+  const items = [];
+  (state.paymentSchedule || []).forEach(rec => {
+    if (rec.archived) return;
+    const lineItems = getPOLineItems(rec.poNumber);
+
+    // Deposit (index 0) — only flags once an invoice actually exists but
+    // hasn't been marked paid; a deposit with no invoice yet has no date
+    // to anchor "this month" against.
+    const dep = rec.payments?.[0];
+    if (dep && dep.invoiceDocId && dep.paidStatus !== 'paid') {
+      const dueDate = dep.date || rec.orderDate || '';
+      const d = parseDate(dueDate);
+      if (d && d.getFullYear() === y && d.getMonth() === m) {
+        items.push({
+          poNumber: rec.poNumber, entity: rec.entity || '—', label: 'Deposit',
+          dueDate, amountRMB: dep.amount, currency: rec.currency || 'RMB',
+          overdue: dueDate < today, recId: rec.id, idx: 0, invId: null
+        });
+      }
+    }
+
+    // 2nd / 3rd payment columns.
+    [1, 2].forEach(idx => {
+      if (idx === 2 && rec.twoInstalmentOnly) return;
+      const p = rec.payments?.[idx];
+      if (!p) return;
+      const status = getPayColumnStatus(rec, idx, lineItems);
+      if (status === 'full') return;
+
+      const invoices = p.invoices || [];
+      const unpaidInvoices = invoices.filter(inv => inv.docId && inv.paidStatus !== 'paid');
+      const paidTotal = invoices.filter(inv => inv.paidStatus === 'paid').reduce((s, inv) => s + (+inv.amount || 0), 0);
+
+      // Due date: the contract's typed-in target date, then the earliest
+      // unpaid invoice's own date, and — only once the column is
+      // completely empty of invoices — the auto-estimate (38 days from
+      // contract date for the 2nd payment, 30 days after that for the 3rd).
+      let dueDate = p.targetDueDate || (unpaidInvoices.map(inv => inv.date).filter(Boolean).sort()[0] || '');
+      let isEstimate = false;
+      if (!dueDate && !invoices.length) {
+        const est = idx === 1 ? getEstimatedSecondPaymentDate(rec) : getEstimatedThirdPaymentDate(rec);
+        if (est) { dueDate = est; isEstimate = true; }
+      }
+      if (!dueDate) return;
+      const d = parseDate(dueDate);
+      if (!d || d.getFullYear() !== y || d.getMonth() !== m) return;
+
+      // Prefer a real, unpaid invoiced amount when one exists (it's the
+      // most concrete number); otherwise fall back to the best-guess
+      // target so the banner always has a figure to show.
+      const unpaidTotal = unpaidInvoices.reduce((s, inv) => s + (+inv.amount || 0), 0);
+      const effectiveTarget = getEffectiveColumnTarget(rec, idx);
+      let amount = null;
+      if (unpaidInvoices.length && effectiveTarget == null) {
+        amount = unpaidTotal > 0 ? unpaidTotal : null;
+      } else if (effectiveTarget != null) {
+        amount = effectiveTarget - paidTotal;
+        if (amount <= 0) return;
+      } else if (!isEstimate) {
+        return; // nothing concrete and no estimate either
+      }
+
+      // Preview target: an actual unpaid invoice if one's been uploaded;
+      // otherwise fall back to the PO contract itself, since that's the
+      // only document that exists yet for a column with nothing invoiced.
+      const previewInv = unpaidInvoices[0] || null;
+      items.push({
+        poNumber: rec.poNumber, entity: rec.entity || '—', label: PAY_COLUMN_LABEL[idx],
+        dueDate, amountRMB: amount, currency: rec.currency || 'RMB',
+        overdue: !isEstimate && dueDate < today, recId: rec.id, idx,
+        invId: previewInv ? previewInv.id : null, isEstimate, hasPODoc: !!rec.poDocId
+      });
+    });
+  });
+  items.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  return items;
+}
+
+function fmtDueDateLong(iso) {
+  const d = parseDate(iso);
+  if (!d) return '—';
+  return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+}
+
+function renderPaymentDueBannerHTML() {
+  const items = getPaymentsDueThisMonth();
+  const hasDue = items.length > 0;
+  const monthLabel = new Date().toLocaleDateString('en-US', { month: 'long' });
+  const rows = items.map(it => {
+    // idx 0 (deposit) is only ever pushed when its invoice exists, so the
+    // preview always opens that. For 2nd/3rd it only opens something when
+    // there's an actual unpaid invoice uploaded — otherwise there's nothing
+    // to show yet, so it's a plain remark rather than a clickable button.
+    let previewBtn = '';
+    if (it.idx === 0) {
+      previewBtn = `<button type="button" class="pay-due-row-preview" onclick="previewPaymentInvoice('${escapeAttr(it.recId)}',0)" title="Preview invoice">🧾 Click to see invoice</button>`;
+    } else if (it.invId) {
+      previewBtn = `<button type="button" class="pay-due-row-preview" onclick="previewPayInvoiceFile('${escapeAttr(it.recId)}',${it.idx},'${escapeAttr(it.invId)}')" title="Preview invoice">🧾 Click to see invoice</button>`;
+    } else {
+      previewBtn = `<span class="pay-due-row-noinvoice">No Invoice Yet</span>`;
+    }
+    return `
+    <div class="pay-due-row${it.overdue ? ' overdue' : ''}">
+      <span class="pay-due-row-badge badge-${it.entity}">${escapeHtml(it.entity)}</span>
+      <span class="pay-due-row-text">
+        <strong>${escapeHtml(it.poNumber)}</strong> - pending <strong>${fmtMoneyConverted(it.amountRMB, it.currency)}</strong> ${it.label} payment on ${it.isEstimate ? '~' : ''}${fmtDueDateLong(it.dueDate)}${it.isEstimate ? '<span class="pay-due-row-estimate-tag">Estimated</span>' : ''}${it.overdue ? '<span class="pay-due-row-overdue-tag">Overdue</span>' : ''}
+      </span>
+      ${previewBtn}
+    </div>`;
+  }).join('');
+
+  return `
+    <details class="pay-due-banner ${hasDue ? 'has-attention' : 'all-clear'}">
+      <summary class="pay-due-banner-summary">
+        <span class="pay-due-banner-icon">${hasDue ? '🔔' : '✓'}</span>
+        <span class="pay-due-banner-count">${items.length}</span>
+        <span class="pay-due-banner-label">
+          ${hasDue ? (items.length === 1 ? 'PO needs payment this month' : 'POs need payment this month') : `no payments due in ${monthLabel}`}
+        </span>
+        <span class="pay-due-banner-meta">US &amp; EU combined · ${payCurrencyView} default</span>
+        <span class="pay-due-banner-chevron">
+          <span class="chev-text-closed">Click to view</span>
+          <span class="chev-text-open">Hide</span>
+          <span class="chev-arrow">▾</span>
+        </span>
+      </summary>
+      <div class="pay-due-banner-body">
+        ${hasDue ? rows : `<div class="pay-due-empty">No 2nd or 3rd payments with a due date landing in ${monthLabel} yet.</div>`}
+      </div>
+    </details>`;
+}
+
 function renderPaymentScheduleByEntity(entityFilter, archived) {
   const recs = (state.paymentSchedule || []).filter(r => r.entity === entityFilter && !!r.archived === !!archived).slice().sort((a,b) => String(a.poNumber).localeCompare(String(b.poNumber), undefined, {numeric:true}));
   const TOTAL_COLS = 9; // PO/Entity, Order, Finish, Total, Deposit, 2nd, 3rd, Paid/Due, Files (incl. Edit/Delete)
@@ -12626,15 +14239,33 @@ function renderPaymentScheduleByEntity(entityFilter, archived) {
     const remainingDueNote = (idx, label) => {
       const status = getPayColumnStatus(rec, idx, lineItems);
       if (status === 'full') return '';
-      const target = p[idx]?.targetAmount;
-      const dueDate = p[idx]?.targetDueDate;
+      let target = p[idx]?.targetAmount;
+      // For the 2nd payment specifically, default the assumed target to the
+      // deposit amount when nothing's been typed in — most of these
+      // contracts split the deposit and 2nd payment evenly (e.g. 30%/30%),
+      // so the deposit is the best guess of what's still owed until Fifi
+      // overrides it with a real figure from the contract.
+      if (target == null && idx === 1 && p[0]?.amount != null) target = p[0].amount;
+      // Due date: the manually-typed target date always wins; failing that,
+      // fall back to the auto-estimate (38 days from the contract's start
+      // date for the 2nd payment, 30 days after that for the 3rd) rather
+      // than just saying "not set" — it's a useful placeholder either way.
+      let dueDate = p[idx]?.targetDueDate;
+      let isEstimatedDate = false;
+      if (!dueDate) {
+        const est = idx === 1 ? getEstimatedSecondPaymentDate(rec)
+          : (idx === 2 && !rec.twoInstalmentOnly ? getEstimatedThirdPaymentDate(rec) : null);
+        if (est) { dueDate = est; isEstimatedDate = true; }
+      }
       if (target == null && !dueDate) return '';
-      const invoiced = (p[idx]?.invoices || []).reduce((s, inv) => s + (+inv.amount || 0), 0);
+      const invoiced = (p[idx]?.invoices || []).filter(inv => inv.paidStatus === 'paid').reduce((s, inv) => s + (+inv.amount || 0), 0);
       const remaining = target != null ? target - invoiced : null;
       if (target != null && remaining <= 0) return '';
       const amountText = remaining != null ? fmtMoneyConverted(remaining, rec.currency) : 'Amount not set';
-      const dueText = dueDate ? `by ${fmtDateShort(dueDate)}` : 'due date not set';
-      const overdue = dueDate && dueDate < todayISO() ? ' pay-remaining-due-overdue' : '';
+      const dueText = dueDate
+        ? `${isEstimatedDate ? '~' : ''}by ${fmtDateShort(dueDate)}${isEstimatedDate ? ' (estimated)' : ''}`
+        : 'due date not set';
+      const overdue = !isEstimatedDate && dueDate && dueDate < todayISO() ? ' pay-remaining-due-overdue' : '';
       return `<div class="pay-remaining-due${overdue}">Due: ${amountText} for the remaining portion of the ${label} · ${dueText}</div>`;
     };
     const targetAmountInput = (idx) => `
@@ -12648,12 +14279,18 @@ function renderPaymentScheduleByEntity(entityFilter, archived) {
       const fileBtn = doc
         ? `<button class="pay-file-btn has-file pay-instalment-invoice-btn" onclick="previewPaymentInvoice('${escapeAttr(rec.id)}', 0)" title="Preview invoice">🧾 See Invoice</button>`
         : `<button class="pay-file-btn pay-instalment-invoice-btn" onclick="triggerPaymentInvoiceUpload('${escapeAttr(rec.id)}', 0)" title="Import invoice for this payment">⬆ Import Invoice</button>`;
+      // Paid/Due only makes sense once an invoice actually exists — before
+      // that there's nothing to have paid against yet.
+      const paidToggle = doc
+        ? `<button class="pay-paiddue-toggle pay-paiddue-${dep.paidStatus === 'paid' ? 'paid' : 'due'}" onclick="togglePayDepositPaidStatus('${escapeAttr(rec.id)}')" title="Click to toggle">${dep.paidStatus === 'paid' ? '✓ Paid' : '● Due'}</button>`
+        : '';
       if (view) {
         return `<div class="pay-instalment-view">
           <span class="pay-instalment-label">Deposit</span>
           <div>${fmtDateShort(dep.date)}</div>
           <div class="pay-view-amount">${dep.amount != null ? fmtMoneyConverted(dep.amount, rec.currency) : '—'}</div>
           ${fileBtn}
+          ${paidToggle}
         </div>`;
       }
       return `<div class="pay-instalment">
@@ -12661,6 +14298,7 @@ function renderPaymentScheduleByEntity(entityFilter, archived) {
         <input type="date" class="pay-mini-input" data-pay-id="${escapeAttr(rec.id)}" data-pay-idx="0" data-pay-pfield="date" value="${escapeAttr(dep.date || '')}">
         <input type="number" step="0.01" class="pay-mini-input" placeholder="Amount" data-pay-id="${escapeAttr(rec.id)}" data-pay-idx="0" data-pay-pfield="amount" value="${dep.amount ?? ''}">
         ${fileBtn}
+        ${paidToggle}
       </div>`;
     };
 
@@ -12684,11 +14322,17 @@ function renderPaymentScheduleByEntity(entityFilter, archived) {
         const fileBtn = doc
           ? `<button class="pay-file-btn has-file pay-instalment-invoice-btn" onclick="previewPayInvoiceFile('${escapeAttr(rec.id)}',${idx},'${escapeAttr(inv.id)}')" title="Preview invoice">🧾 See ${invoiceLabel}</button>`
           : `<button class="pay-file-btn pay-instalment-invoice-btn" onclick="triggerPayInvoiceFileUpload('${escapeAttr(rec.id)}',${idx},'${escapeAttr(inv.id)}')" title="Import invoice">⬆ Import ${invoiceLabel}</button>`;
+        // Paid/Due only makes sense once an invoice actually exists — before
+        // that there's nothing to have paid against yet.
+        const paidToggle = doc
+          ? `<button class="pay-paiddue-toggle pay-paiddue-${inv.paidStatus === 'paid' ? 'paid' : 'due'}" onclick="togglePayInvoicePaidStatus('${escapeAttr(rec.id)}',${idx},'${escapeAttr(inv.id)}')" title="Click to toggle">${inv.paidStatus === 'paid' ? '✓ Paid' : '● Due'}</button>`
+          : '';
         if (view) {
           return `<div class="pay-invoice-item">
             <div>${fmtDateShort(inv.date)}</div>
             <div class="pay-view-amount">${inv.amount != null ? fmtMoneyConverted(inv.amount, rec.currency) : '—'}</div>
             ${fileBtn}
+            ${paidToggle}
           </div>`;
         }
         return `<div class="pay-invoice-item pay-invoice-item-edit">
@@ -12699,6 +14343,7 @@ function renderPaymentScheduleByEntity(entityFilter, archived) {
           <input type="date" class="pay-mini-input" value="${escapeAttr(inv.date||'')}" onchange="updatePayInvoiceField('${escapeAttr(rec.id)}',${idx},'${escapeAttr(inv.id)}','date',this.value)">
           <input type="number" step="0.01" class="pay-mini-input" placeholder="Amount" value="${inv.amount ?? ''}" onchange="updatePayInvoiceField('${escapeAttr(rec.id)}',${idx},'${escapeAttr(inv.id)}','amount',this.value)">
           ${fileBtn}
+          ${paidToggle}
           ${skuTagUI(idx, inv)}
         </div>`;
       }).join('');
@@ -12805,6 +14450,7 @@ function renderPaymentScheduleByEntity(entityFilter, archived) {
         : `Total cost, order &amp; finish dates, and the payment schedule for every ${entityFilter} manufacturer PO — with linked PO/Invoice files. 2nd &amp; 3rd payments can hold multiple partial invoices when different SKUs finish at different times. Click the banner under any row to see payments broken down by SKU, including delivery date.`}</p>
     </div>
     ${renderCurrencyToggleBar()}
+    ${archived ? '' : renderPaymentDueBannerHTML()}
     ${renderPaymentTrackerSubTabs(archived ? archiveView : activeView, archived)}
     ${archived
       ? `<div class="action-bar" style="margin-bottom:10px;"><button class="btn" onclick="setView('${activeView}')">◂ Back to Active Payments</button></div>`
@@ -12955,7 +14601,7 @@ function handlePOSummaryFile(file) {
           if (d == null && (a == null || a === '' || a === 'N/A')) return;
           if (!Array.isArray(rec.payments[idx].invoices)) rec.payments[idx].invoices = [];
           if (!rec.payments[idx].invoices.length) {
-            rec.payments[idx].invoices.push({ id: uid('inv_'), docId: null, date: '', amount: null, skuAllocations: null, percent: null });
+            rec.payments[idx].invoices.push({ id: uid('inv_'), docId: null, date: '', amount: null, skuAllocations: null, percent: null, paidStatus: 'due' });
           }
           const inv = rec.payments[idx].invoices[0];
           if (d) inv.date = excelDateToISO(d);
@@ -14597,6 +16243,25 @@ document.getElementById('tsv-date-overlay').addEventListener('click', e => {
 document.getElementById('tsv-date-input').addEventListener('input', updateTsvDateMeta);
 document.getElementById('tsv-date-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') confirmTsvImport();
+});
+document.getElementById('split-sales-archive-overlay').addEventListener('click', e => {
+  if (e.target.id === 'split-sales-archive-overlay') closeArchivedSalesMonth();
+});
+document.getElementById('split-import-input').addEventListener('change', e => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (f && _splitPendingImport) parseSplitImportFile(f, _splitPendingImport.type, _splitPendingImport.store);
+});
+document.getElementById('split-reconciliation-input').addEventListener('change', e => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (f && _splitReconciliationStore) parseSplitReconciliationFile(f, _splitReconciliationStore);
+});
+document.getElementById('recon-report-overlay').addEventListener('click', e => {
+  if (e.target.id === 'recon-report-overlay') closeSplitReconciliationReport();
+});
+document.getElementById('split-receipt-overlay').addEventListener('click', e => {
+  if (e.target.id === 'split-receipt-overlay') closeAddReceiptModal();
 });
 document.getElementById('modal-cancel').addEventListener('click', closeModal);
 document.getElementById('modal-send').addEventListener('click', sendOrderEmail);
