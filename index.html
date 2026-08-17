@@ -4943,6 +4943,93 @@ function fmtDateRelative(d) {
  * Returns empty string if there's only one unique delivery date
  * (callers fall back to a single "next delivery:" line in that case).
  */
+// Full per-delivery timeline (superset of computeDeliveryGap): returns every
+// grouped delivery in order with its date, days-from-now, and whether cover
+// runs out before it arrives (with the size of that gap). Used by the
+// banner row so all deliveries can be listed, not just the worst gap.
+function computeDeliveryTimeline(batches, ads, daysImmediate) {
+  if (!Array.isArray(batches) || batches.length === 0) return [];
+  const groups = new Map();
+  batches.forEach(b => {
+    const date = getBatchArrival(b && b.po, b && b.li);
+    const li = b && b.li;
+    const qty = Math.max(0, (+(li && li.quantity) || 0) - (+(li && li.unitsCompleted) || 0));
+    if (qty <= 0) return;
+    const key = date ? date.toISOString().slice(0, 10) : '_no_date';
+    if (!groups.has(key)) groups.set(key, { date, qty: 0 });
+    groups.get(key).qty += qty;
+  });
+  if (groups.size === 0) return [];
+  const sorted = Array.from(groups.values()).sort((a, b) => {
+    if (!a.date) return 1;
+    if (!b.date) return -1;
+    return a.date - b.date;
+  });
+  const safeAds = +ads > 0 ? +ads : 0;
+  const todayMs = Date.now();
+  let cumulativeQty = 0;
+  return sorted.map((g, i) => {
+    const daysBefore = safeAds > 0
+      ? (+daysImmediate || 0) + (cumulativeQty / safeAds)
+      : Infinity;
+    cumulativeQty += g.qty;
+    const daysFromNow = g.date ? Math.round((g.date - todayMs) / 86400000) : null;
+    const hasGap = isFinite(daysBefore) && daysFromNow != null && daysFromNow > 0 && daysBefore < daysFromNow;
+    return {
+      index: i + 1,
+      date: g.date,
+      daysFromNow,
+      hasGap,
+      gapDays: hasGap ? Math.round(daysFromNow - daysBefore) : 0
+    };
+  });
+}
+
+// Computation-only counterpart to renderDeliveryBreakdown(): walks the same
+// per-delivery cumulative-cover math but just returns whether any delivery
+// in the pipeline has a stockout gap in front of it (cover runs out before
+// that batch arrives), plus how many days wide the gap is and which delivery
+// it's in front of. Used to surface the warning in the reorder banner even
+// when the aggregate "incl. prod" days-of-cover looks healthy.
+function computeDeliveryGap(batches, ads, daysImmediate) {
+  if (!Array.isArray(batches) || batches.length === 0) return { hasGap: false };
+  const groups = new Map();
+  batches.forEach(b => {
+    const date = getBatchArrival(b && b.po, b && b.li);
+    const li = b && b.li;
+    const qty = Math.max(0, (+(li && li.quantity) || 0) - (+(li && li.unitsCompleted) || 0));
+    if (qty <= 0) return;
+    const key = date ? date.toISOString().slice(0, 10) : '_no_date';
+    if (!groups.has(key)) groups.set(key, { date, qty: 0 });
+    groups.get(key).qty += qty;
+  });
+  if (groups.size === 0) return { hasGap: false };
+  const sorted = Array.from(groups.values()).sort((a, b) => {
+    if (!a.date) return 1;
+    if (!b.date) return -1;
+    return a.date - b.date;
+  });
+  const safeAds = +ads > 0 ? +ads : 0;
+  const todayMs = Date.now();
+  let cumulativeQty = 0;
+  let worst = null;
+  sorted.forEach(g => {
+    const daysBefore = safeAds > 0
+      ? (+daysImmediate || 0) + (cumulativeQty / safeAds)
+      : Infinity;
+    cumulativeQty += g.qty;
+    const daysFromNow = g.date ? Math.round((g.date - todayMs) / 86400000) : null;
+    const warn = isFinite(daysBefore) && daysFromNow != null && daysFromNow > 0 && daysBefore < daysFromNow;
+    if (warn) {
+      const gapDays = daysFromNow - daysBefore;
+      if (!worst || gapDays > worst.gapDays) {
+        worst = { gapDays, gapDate: g.date, daysBefore, daysFromNow };
+      }
+    }
+  });
+  return worst ? { hasGap: true, ...worst } : { hasGap: false };
+}
+
 function renderDeliveryBreakdown(batches, ads, daysImmediate) {
   if (!Array.isArray(batches) || batches.length === 0) return '';
   const groups = new Map();
@@ -6865,6 +6952,13 @@ function getCombinedWarehouseReorder() {
     else if (base.inProductionQty > 0 && daysImmediate <= REORDER_DAYS) status = 'pipeline';
     else                                         status = 'healthy';
 
+    // Stockout-gap check: the "incl. prod" total can look healthy even when
+    // stock would run dry between two incoming deliveries (e.g. batch #1
+    // arrives, gets used up, and batch #2 lands too late). This looks across
+    // every batch, not just the soonest one, so it catches gaps the
+    // status/reliefDays logic above misses.
+    const gap = computeDeliveryGap(base.batches, base.adsN, daysImmediate);
+
     if (!e.name) e.name = e.sku;
     return {
       sku: e.sku, name: e.name, photo: e.photo,
@@ -6874,7 +6968,11 @@ function getCombinedWarehouseReorder() {
       inProductionQty: base.inProductionQty,
       soonestPromise: base.soonestPromise,
       leadDays: base.leadDays,
+      batches: base.batches,
       daysImmediate, daysTotal, daysToArrival,
+      hasDeliveryGap: gap.hasGap,
+      deliveryGapDays: gap.hasGap ? gap.gapDays : null,
+      deliveryGapDate: gap.hasGap ? gap.gapDate : null,
       status
     };
   }).filter(p => {
@@ -7449,7 +7547,10 @@ function buildWarehouseReorderBannerHTML() {
 
   const order = { out: 0, critical: 1, reorder: 2, pipeline: 3, healthy: 4 };
   const attention = combined
-    .filter(p => p.status !== 'healthy')
+    // Also surface SKUs whose aggregate "incl. prod" cover looks fine but
+    // which have a stockout gap between two incoming deliveries — otherwise
+    // a healthy-looking total masks a real interim OOS window.
+    .filter(p => p.status !== 'healthy' || p.hasDeliveryGap)
     .sort((a, b) => order[a.status] - order[b.status] || a.daysImmediate - b.daysImmediate);
   const statusLabel = { healthy:'Healthy', reorder:'Reorder', critical:'Critical', out:'Out', pipeline:'In Pipeline' };
 
@@ -7459,7 +7560,11 @@ function buildWarehouseReorderBannerHTML() {
   // shelf hits zero. That calls for expediting the existing PO, not placing
   // a new one, so it gets pulled into its own bucket below instead of
   // inflating the headline reorder count under a scary CRITICAL badge.
-  const isExpediteOnly = p => p.status === 'critical' && p.inProductionQty > 0 && p.daysTotal > REORDER_DAYS - EXPEDITE_ONLY_TOLERANCE_DAYS;
+  // Same bucket for the delivery-gap case: total incoming supply is fine,
+  // it's just sequenced badly (cover runs dry between two batches), so a
+  // new PO isn't the fix there either — the existing batch needs expediting.
+  const isExpediteOnly = p => (p.status === 'critical' && p.inProductionQty > 0 && p.daysTotal > REORDER_DAYS - EXPEDITE_ONLY_TOLERANCE_DAYS)
+    || (p.hasDeliveryGap && p.status !== 'out' && p.status !== 'reorder');
 
   // "In pipeline" SKUs already have enough incoming production to clear the
   // reorder threshold once it lands (see getCombinedWarehouseReorder) — they
@@ -7511,6 +7616,25 @@ function buildWarehouseReorderBannerHTML() {
         ` : ''}
       </div>
       ${variant === 'expedite' ? (() => {
+        // If the SKU's problem is a delivery-sequencing gap, list every
+        // incoming delivery with its own countdown (not just the first),
+        // so it's clear WHICH delivery the shelf won't survive until —
+        // showing only the worst gap's date was confusing when an earlier,
+        // perfectly-fine delivery is also on the way.
+        if (p.hasDeliveryGap) {
+          const ord = i => (i === 1 ? '1st' : i === 2 ? '2nd' : i === 3 ? '3rd' : `${i}th`);
+          const timeline = computeDeliveryTimeline(p.batches, p.adsN, p.daysImmediate);
+          const deliveryLines = timeline.map(t => {
+            const when = t.daysFromNow == null ? 'TBD' : (t.daysFromNow === 0 ? 'today' : `in ${t.daysFromNow}d`);
+            return `${ord(t.index)} delivery ${when}`;
+          }).join('<br>');
+          const gapLines = timeline.filter(t => t.hasGap)
+            .map(t => `OOS ~${t.gapDays}d before ${ord(t.index)} delivery`)
+            .join('<br>');
+          return `<span class="status status-expedite" style="display:block; white-space:normal; text-align:right; line-height:1.35;">
+            ${deliveryLines}${gapLines ? `<br><span style="font-size:11px;">${gapLines}</span>` : ''}
+          </span>`;
+        }
         const hasPromise = p.daysToArrival !== null;
         const relief    = hasPromise ? p.daysToArrival : (p.leadDays || DEFAULT_LEAD_DAYS);
         const daysToArr = Math.max(0, Math.round(relief));
@@ -7556,7 +7680,7 @@ function buildWarehouseReorderBannerHTML() {
         ${mainList.length > 0 ? reorderRows : (hasExpedite ? '' : `<div class="wh-reorder-empty">Every main product is above the ${REORDER_DAYS}-day cover threshold across both warehouses. Nothing to reorder right now.</div>`)}
         ${hasExpedite ? `
           <div class="wh-reorder-expedite-heading">⏱ Needs expediting before next delivery</div>
-          <div class="wh-reorder-expedite-note">Already enough production incoming to clear ${REORDER_DAYS} days of cover once it lands — no new order needed. But the current batch won't arrive before the shelf hits zero, so push the supplier to speed up delivery.</div>
+          <div class="wh-reorder-expedite-note">Already enough production incoming to clear ${REORDER_DAYS} days of cover once it lands — no new order needed. But either the current batch won't arrive before the shelf hits zero, or a later batch in the pipeline won't arrive before an earlier one runs out — so push the supplier to speed up delivery.</div>
           ${expediteRows}
         ` : ''}
       </div>
