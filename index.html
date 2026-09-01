@@ -4157,6 +4157,22 @@
   </div>
 </div>
 
+<!-- New-product confirmation — shown when a Sales / Units Received / Non-Store
+     Outbound import references a SKU the DayOne catalog doesn't have yet.
+     Nothing is added to the catalog until Fifi explicitly confirms here. -->
+<div class="transfer-overlay" id="split-newsku-overlay" style="display:none;">
+  <div class="transfer-modal" style="max-width:460px;">
+    <h2 id="split-newsku-title">🆕 Registering a new product</h2>
+    <p id="split-newsku-desc" style="font-size:13px; color:var(--ink-soft); margin-bottom:16px; line-height:1.6;"></p>
+    <div id="split-newsku-list" style="font-size:13px; color:var(--ink); background:var(--lavender-faint); border:1px solid var(--line); border-radius:var(--radius); padding:12px; max-height:220px; overflow-y:auto;"></div>
+    <p style="font-size:12px; color:var(--ink-mute); margin-top:12px;">Confirming adds these to the DayOne catalog and continues the import. Cancelling makes no changes at all — nothing is imported and nothing is registered.</p>
+    <div class="transfer-modal-actions" style="margin-top:20px;">
+      <button class="btn btn-ghost" onclick="cancelSplitNewSkuModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmSplitNewSkuModal()">Register &amp; Import</button>
+    </div>
+  </div>
+</div>
+
 <!-- US EU Split Sales Tracker — reconciliation report. Opening balances are
      never set from the fulfillment partner's file (see getSplitOpeningForSku);
      this just checks US closing + EU closing against the partner's combined
@@ -4356,6 +4372,9 @@ let pendingPhotoTarget = null;
 let _splitPendingImport = null;
 let splitTrackerMonth = {};
 let _splitReconciliationStore = null;
+// Holds { type, store, rows, iso, categorySel, newSkus } while the "Registering
+// a new product" confirmation is up — see applySplitImport / openSplitNewSkuModal.
+let _splitNewSkuPending = null;
 
 // Bulk selection state — only used in BS warehouse view for the "move many to
 // DayOne at once" workflow. Cleared whenever the user navigates away or clicks
@@ -4586,6 +4605,7 @@ function applyRemoteState(parsed) {
   seedEmbeddedPOData();
   seedSplitAugustBaseline();
   fixSplitBaselineDiscrepancy();
+  fixSplitReconciliationAug2026();
   migrateOneTimeInvoices();
 }
 
@@ -5641,6 +5661,28 @@ function fixSplitBaselineDiscrepancy() {
   state.splitBaselineFix2Applied = true;
 }
 
+// August 2026 reconciliation adjustment vs the fulfillment partner's
+// real-time DayOne export (inventory_list_exports20260831_20_47_31.xls,
+// "Stock Forecast" column). Fifi confirmed the partner's real-time snapshot
+// is the authoritative physical count, and that any gap vs. our own book
+// should be absorbed entirely on the EU side (the US side is left exactly
+// as-is — including the two SKUs already corrected by
+// fixSplitBaselineDiscrepancy() above). For each SKU below,
+// newEuOpening = oldEuOpening + (partnerStockForecast − (usClosing + euClosing))
+// computed from the August 2026 ledger as it stood right before this patch,
+// so that after this runs, US closing + EU closing for August 2026 matches
+// the partner file exactly for every SKU that had a discrepancy. Runs once
+// (guarded by state.splitReconciliationFixAug2026Applied) so it also
+// corrects browsers that already loaded before this fix shipped.
+function fixSplitReconciliationAug2026() {
+  if (state.splitReconciliationFixAug2026Applied) return;
+  const t = ensureSplitTracker();
+  const euOpenings = { 'DHOD2-CC627001': 47, 'DHOD2-CC628001': 275, 'DHOD2-CC643001': 25610, 'DHOD2-CC643002': 25001, 'DPCD2-CC305001': 5263, 'DPCD2-CC305002': 63319, 'DPCD2-CC479001': 7111, 'DPCD2-CC579001': 745, 'DPCD2-CC580001': 20675, 'DPCD2-CC581001': 2648, 'DPCD2-CC581002': 1841, 'DPCD2-CC581003': 689, 'DPCD2-CC581004': -61, 'DPCD2-CC581005': 2430, 'DPCD2-CC582001': 12052, 'DPCD2-CC583001': 1637, 'DPCD2-CC612001': 27, 'DPCD2-CC612002': -1, 'DPCD2-CC612003': 128, 'DPCD2-CC612004': 69, 'DPCD2-CC612005': 29, 'DPCD2-CC613001': 60, 'DPCD2-CC613002': 52, 'DPCD2-CC613003': 638, 'DPCD2-CC613004': 143, 'DPCD2-CC613005': 284, 'DPCD2-CC614001': 352, 'DPCD2-CC614003': 119, 'DPCD2-CC614004': 373, 'DPCD2-CC614005': 96, 'DPCD2-CC618001': 168, 'DPCD2-CC618002': 388, 'DPCD2-CC618006': 84, 'DPCD2-CC626001': 22, 'DPCD2-CC644001': 938, 'DPCD2-CC644002': 590, 'DPCD2-CC644003': 477, 'DPCD2-CC644004': 324, 'DPCD2-CC644005': 408, 'DPCD2-CC645001': 806, 'DPCD2-CC646001': 427, 'DPCD2-CC647001': -2, 'DPCD2-CC699001': 773, 'DPCD2-XD572001': 58995, 'DPCD2-XD572002': 2633, 'DPCD2-XD590001': 451 };
+  if (!t.eu.openings[SPLIT_BASELINE_MONTH]) t.eu.openings[SPLIT_BASELINE_MONTH] = {};
+  Object.entries(euOpenings).forEach(([sku, qty]) => { t.eu.openings[SPLIT_BASELINE_MONTH][sku] = qty; });
+  state.splitReconciliationFixAug2026Applied = true;
+}
+
 // Whole-day difference fromISO minus toISO (positive when fromISO is later).
 // Used to map a split-sales entry's date onto the Avg Daily Sales tab's
 // day-offset grid, which is anchored to state.salesAnchorDate.
@@ -5787,6 +5829,17 @@ function computeSplitLedger(store, monthKey) {
   });
   receiptEntriesBySku.forEach(list => list.sort((a, b) => a.date.localeCompare(b.date)));
 
+  // Same idea as receiptEntriesBySku, for the Outbound column — powers its
+  // per-entry "−123 pcs · FBA · Aug 1" list with a ✕ to remove just that
+  // one entry, instead of only showing the summed total.
+  const outboundEntriesBySku = new Map();
+  t.outbound.forEach(r => {
+    if (splitMonthKey(r.date) !== monthKey) return;
+    if (!outboundEntriesBySku.has(r.sku)) outboundEntriesBySku.set(r.sku, []);
+    outboundEntriesBySku.get(r.sku).push({ id: r.id, date: r.date, qty: +r.qty || 0, category: r.category || '' });
+  });
+  outboundEntriesBySku.forEach(list => list.sort((a, b) => a.date.localeCompare(b.date)));
+
   return skus.map(p => {
     const open     = getSplitOpeningForSku(store, p.sku, monthKey);
     const received = receivedBySku.get(p.sku) || 0;
@@ -5795,6 +5848,7 @@ function computeSplitLedger(store, monthKey) {
     return {
       sku: p.sku, name: p.name, photo: p.photo,
       receiptEntries: receiptEntriesBySku.get(p.sku) || [],
+      outboundEntries: outboundEntriesBySku.get(p.sku) || [],
       opening: open, received, sold, outbound,
       closing: open + received - sold - outbound
     };
@@ -5947,6 +6001,22 @@ function renderSplitTracker(store) {
           </div>`).join('')
       : `<span style="color:var(--ink-mute)">—</span>`;
 
+    const outboundListHtml = r.outboundEntries.length
+      ? r.outboundEntries.map(e => {
+          const catStyle = splitOutboundCategoryStyle(e.category);
+          const catBadge = e.category
+            ? `<span style="display:inline-block;padding:1px 7px;border-radius:999px;background:${catStyle.bg};color:${catStyle.fg};font-size:10px;font-weight:700;letter-spacing:0.02em;white-space:nowrap;">${escapeHtml(e.category)}</span>`
+            : '';
+          return `
+          <div style="white-space:nowrap; font-size:12px; display:flex; align-items:center; gap:6px; margin:2px 0;">
+            <span style="color:var(--status-reorder);">−${fmtNum(e.qty)} pcs</span>
+            ${catBadge}
+            <span style="color:var(--ink-mute);">${escapeHtml(fmtDateDisplay(e.date))}</span>
+            <button class="split-outbound-delete" data-store="${store}" data-id="${escapeAttr(e.id)}" title="Remove this outbound entry" style="border:none;background:none;cursor:pointer;color:var(--ink-mute);font-size:11px;padding:0;">✕</button>
+          </div>`;
+        }).join('')
+      : `<span style="color:var(--ink-mute)">—</span>`;
+
     // "This entity's own inventory out" excludes whatever was actually
     // covered by the crossover — sold+outbound is the TOTAL that left DayOne
     // for this SKU, and crossoverQty is the slice of that total which was
@@ -5978,7 +6048,9 @@ function renderSplitTracker(store) {
         <button class="btn btn-ghost" style="margin-top:4px;padding:2px 8px;font-size:11px;" onclick="openAddReceiptModal('${store}', '${escapeAttr(r.sku)}')">+ Add</button>
       </td>
       <td class="numeric" data-sort-value="${r.sold}" style="color:var(--status-critical);">${r.sold ? '−' + fmtNum(r.sold) : '—'}</td>
-      <td class="numeric" data-sort-value="${r.outbound}" style="color:var(--status-reorder);">${r.outbound ? '−' + fmtNum(r.outbound) : '—'}</td>
+      <td class="numeric" data-sort-value="${r.outbound}">
+        ${outboundListHtml}
+      </td>
       <td class="numeric" data-sort-value="${r.closing}"><strong>${fmtNum(r.closing)}</strong></td>
       <td data-sort-value="${thisOut + crossoverQty}">${outHtml}</td>
       <td data-label=""><button class="row-delete" onclick="deleteSplitRow('${store}', '${escapeAttr(r.sku)}')" title="Remove this SKU's data for ${escapeAttr(fmtMonthLabel(monthKey))}">${trashIconSVG()}</button></td>
@@ -6015,6 +6087,7 @@ function renderSplitTracker(store) {
       <button class="btn" onclick="triggerSplitImport('outbound', '${store}')">🚛 Import Non-Store Outbound (${storeUpper})</button>
       <button class="btn btn-ghost" onclick="downloadSplitImportTemplate()" title="A blank spreadsheet with just SKU + Quantity columns, pre-filled with every SKU tracked here — fill in the numbers and use it with the Units Received or Non-Store Outbound import buttons above.">⬇ Download Template (SKU + Qty)</button>
       <button class="btn btn-ghost" onclick="triggerSplitReconciliation('${store}')" title="Import the fulfillment partner's combined Stock Forecast export (the same file the Warehouse tab's Sync from Fulfillment Partner reads) and check it against US closing + EU closing for ${escapeAttr(fmtMonthLabel(monthKey))}. Opening balances are never set from this file — they carry forward automatically month to month.">📋 Check Reconciliation vs Fulfillment Partner</button>
+      <button class="btn btn-ghost" onclick="exportSplitInventoryFlow('${store}')" title="Download an Excel file for ${escapeAttr(fmtMonthLabel(monthKey))} with two sheets — US and EU. Each sheet shows, per SKU: Opening Inventory, Received Qty + Received Date (one bullet per delivery), Sales fulfilled from US Inventory, Sales fulfilled from EU Inventory (crossover-adjusted — matches the gold 'Currently using EU/US inventory' pills above), Other Outflow (non-store outbound), Closing Inventory, and a Remarks cell listing each crossover period as its own bullet (e.g. 'For 22 Aug 2026 – 24 Aug 2026 used EU inventory (30 pcs)').">📊 Export Opening / Sales / Outflow (XLSX)</button>
     </div>
     <p style="margin-top:10px; font-size:11px; color:var(--ink-mute); line-height:1.6;">
       Opening balance carries forward from last month's closing automatically — type directly into the Opening column only to fix a one-off error · Sold comes automatically from the ${storeUpper} Sales tab · use "+ Add" on any row to log a new dated delivery — you can add more than one per month.
@@ -6039,6 +6112,99 @@ function downloadSplitImportTemplate() {
   XLSX.utils.book_append_sheet(wb, ws, 'Template');
   XLSX.writeFile(wb, 'facelove-split-tracker-import-template.xlsx');
   toast(`Template downloaded · ${skus.length} SKU${skus.length === 1 ? '' : 's'} — fill in Quantity (and Date, e.g. 2026-08-04, if rows differ) then use it with any of the Sales / Units Received / Outbound import buttons.`);
+}
+
+// ---- "Opening / Sales by Inventory / Other Outflow" export ----
+// One workbook, two sheets (US, EU), for whichever month is currently
+// selected on the tab the button was clicked from. Each sheet shows that
+// store's own Opening + Closing, plus SALES split by which entity's
+// physical stock actually covered it — the same crossover logic already
+// driving the gold "Currently using EU/US inventory" pills on-screen,
+// just broken into two explicit numeric columns instead of a badge — and
+// Other Outflow (non-store outbound: FBA/Seeding/PR/CS/Damages) shown at
+// face value for that store.
+//
+// Assumption worth flagging: crossoverQty below comes from the SAME
+// combined sold+outbound depletion the on-screen streaks use (there's no
+// per-event ordering recorded for same-day sold vs outbound, so there's no
+// way to know for certain which one a same-day shortfall belongs to).
+// This attributes crossover to Sales first (capped at that period's sold
+// total) since outbound events are the rarer, smaller side of depletion in
+// practice — that keeps the four numbers reconciling (Opening + Received
+// − Sales(US) − Sales(EU) − Other Outflow = Closing) without a second,
+// independent crossover simulation. On a SKU with heavy outbound volume
+// AND a crossover streak the same month, treat the Sales split as a close
+// approximation rather than exact.
+function buildSplitInventoryFlowRows(store, monthKey) {
+  const rows = computeSplitLedger(store, monthKey);
+  const scoped = store === 'us' ? rows.filter(r => getUsEverReceivedSkuSet().has(r.sku)) : rows;
+  const otherLabel = store === 'us' ? 'EU' : 'US';
+  return scoped.map(r => {
+    const streaks = getSplitCrossoverStreaks(store, r.sku, monthKey);
+    const crossoverQty = streaks.reduce((s, x) => s + x.qty, 0);
+    const crossFromSales = Math.min(crossoverQty, r.sold);
+    const ownSales = r.sold - crossFromSales;
+    const salesUS = store === 'us' ? ownSales : crossFromSales;
+    const salesEU = store === 'us' ? crossFromSales : ownSales;
+    // One bullet per crossover streak — "For 22 Aug 2026 – 24 Aug 2026 used
+    // EU inventory (30 pcs)" — joined with line breaks into a single cell.
+    const remarks = streaks.map(s => {
+      const range = s.start === s.end
+        ? `For ${fmtDateDisplay(s.start)}`
+        : `For ${fmtDateDisplay(s.start)} – ${fmtDateDisplay(s.end)}`;
+      return `• ${range} used ${otherLabel} inventory (${fmtNum(s.qty)} pcs)${s.ongoing ? ' — ongoing' : ''}`;
+    }).join('\n');
+    // One bullet per dated delivery this month — "• 22 Aug 2026: 550 pcs" —
+    // a SKU can receive stock more than once in a month, same as the
+    // on-screen Received column's list.
+    const receivedDates = r.receiptEntries.map(e => `• ${fmtDateDisplay(e.date)}: ${fmtNum(e.qty)} pcs`).join('\n');
+    return {
+      sku: r.sku, name: r.name,
+      opening: r.opening, received: r.received, receivedDates,
+      salesUS, salesEU,
+      otherOutflow: r.outbound, closing: r.closing, remarks
+    };
+  });
+}
+
+function exportSplitInventoryFlow(store) {
+  const monthKey = getSplitSelectedMonth(store);
+  const monthLabel = fmtMonthLabel(monthKey);
+  const headers = ['SKU', 'Product Name', 'Opening Inventory', 'Received Qty', 'Received Date', 'Sales — US Inventory', 'Sales — EU Inventory', 'Other Outflow', 'Closing Inventory', 'Remarks'];
+  const multilineCols = [4, 9]; // Received Date, Remarks — zero-indexed column positions above
+  const wb = XLSX.utils.book_new();
+  ['us', 'eu'].forEach(s => {
+    const data = buildSplitInventoryFlowRows(s, monthKey);
+    if (!data.length) return;
+    const aoa = [headers, ...data.map(r => [
+      r.sku, r.name, r.opening, r.received, r.receivedDates,
+      r.salesUS, r.salesEU, r.otherOutflow, r.closing, r.remarks
+    ])];
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = [{ wch: 22 }, { wch: 34 }, { wch: 16 }, { wch: 14 }, { wch: 30 }, { wch: 18 }, { wch: 18 }, { wch: 14 }, { wch: 16 }, { wch: 42 }];
+    ws['!freeze'] = { xSplit: 0, ySplit: 1 };
+    // Wrap text on the multi-bullet columns (Received Date, Remarks) so
+    // multi-line cells actually show every line instead of one long
+    // run-on string. Community-edition SheetJS write support for cell
+    // styles is inconsistent across Excel versions/viewers, so this is a
+    // best effort — if a bullet cell still shows as one line when opened,
+    // select the column and turn on Format > Wrap Text manually; the line
+    // breaks are already in the data.
+    data.forEach((r, i) => {
+      multilineCols.forEach(col => {
+        const addr = XLSX.utils.encode_cell({ r: i + 1, c: col });
+        if (ws[addr] && ws[addr].v) ws[addr].s = { alignment: { wrapText: true, vertical: 'top' } };
+      });
+    });
+    ws['!rows'] = [{}, ...data.map(r => {
+      const lines = Math.max(r.receivedDates.split('\n').length, r.remarks.split('\n').length, 1);
+      return (r.receivedDates || r.remarks) ? { hpx: Math.max(20, lines * 15) } : {};
+    })];
+    XLSX.utils.book_append_sheet(wb, ws, s.toUpperCase());
+  });
+  if (!wb.SheetNames.length) { toast(`No data to export for ${monthLabel}`); return; }
+  XLSX.writeFile(wb, `facelove-split-inventory-flow-${monthKey}.xlsx`);
+  toast(`Exported Opening / Sales / Outflow for ${monthLabel} · US and EU sheets`);
 }
 
 // Removes one SKU's data for the store/month currently being viewed —
@@ -6106,6 +6272,18 @@ function deleteSplitReceiptEntry(store, id) {
   saveState();
   render();
   toast('Removed delivery entry');
+}
+
+function deleteSplitOutboundEntry(store, id) {
+  const t = ensureSplitTracker()[store];
+  const entry = t.outbound.find(r => r.id === id);
+  if (!entry) return;
+  const catLabel = entry.category ? ` (${entry.category})` : '';
+  if (!confirm(`Remove this ${fmtNum(entry.qty)}-unit outbound entry${catLabel} on ${fmtDateDisplay(entry.date)} for ${entry.sku}?`)) return;
+  t.outbound = t.outbound.filter(r => r.id !== id);
+  saveState();
+  render();
+  toast('Removed outbound entry');
 }
 
 /* ============================================================
@@ -6360,6 +6538,21 @@ function normalizeOutboundCategory(v) {
   return '';
 }
 
+// Color per outbound category, so a mixed batch of PR / CS / FBA / Seeding
+// / Damages entries on the same SKU reads at a glance instead of everyone
+// blurring into one plain "−123 pcs" line — used by the Outbound column's
+// per-entry badges.
+function splitOutboundCategoryStyle(category) {
+  const map = {
+    FBA:     { bg: 'var(--status-pipeline-bg)', fg: 'var(--status-pipeline)' },
+    Seeding: { bg: 'var(--status-healthy-bg)',  fg: 'var(--status-healthy)' },
+    PR:      { bg: 'var(--gold-bg)',            fg: 'var(--gold-border)' },
+    CS:      { bg: 'var(--status-reorder-bg)',  fg: 'var(--status-reorder)' },
+    Damages: { bg: 'var(--status-critical-bg)', fg: 'var(--status-critical)' }
+  };
+  return map[category] || { bg: 'var(--status-out-bg)', fg: 'var(--status-out)' };
+}
+
 // Strips a leading UTF-8 BOM (common in "CSV UTF-8" exports from Excel /
 // fulfillment-partner portals — without this, the very first header cell
 // silently fails every regex test and the whole file gets rejected) and any
@@ -6386,6 +6579,16 @@ function isSplitQtyHeader(h) {
 // shared date modal.
 function isSplitDateHeader(h) {
   return /\bdate\b/i.test(String(h || '').trim());
+}
+// Optional Product Name column — the generic template (downloadSplitImportTemplate)
+// already ships one, but nothing was reading it before, so a brand-new SKU
+// imported without ever being added under Warehouse first had no name to
+// register itself with. Excludes anything that already matched as the SKU
+// header so a column like "Item SKU" can't double as the name column too.
+function isSplitNameHeader(h) {
+  const s = String(h || '').trim();
+  if (isSplitSkuHeader(s)) return false;
+  return /\b(product\s*name|name|description|item)\b/i.test(s);
 }
 
 // ---- Reconciliation vs the fulfillment partner's combined stock file ----
@@ -6467,7 +6670,17 @@ function showSplitReconciliationReport(store, pairs) {
   const euClosingBySku = new Map(euRows.map(r => [r.sku, r.closing]));
   const nameBySku = new Map(usRows.map(r => [r.sku, r.name]));
 
-  const results = pairs.map(p => {
+  // Checking from the US tab should only ever surface SKUs the US entity has
+  // actually stocked — the same "ever received in US" rule the US Inventory
+  // tab itself uses (getUsEverReceivedSkuSet) — otherwise every EU-only SKU
+  // the partner's file also happens to report shows up here even though the
+  // US store never carried it. The EU tab isn't scoped this way since
+  // virtually the whole catalog is EU-eligible already (see renderSplitTracker).
+  const everUS = store === 'us' ? getUsEverReceivedSkuSet() : null;
+  const scopedPairs = everUS ? pairs.filter(p => everUS.has(p.sku)) : pairs;
+  const skippedCount = pairs.length - scopedPairs.length;
+
+  const results = scopedPairs.map(p => {
     const usC = usClosingBySku.get(p.sku) || 0;
     const euC = euClosingBySku.get(p.sku) || 0;
     const books = usC + euC;
@@ -6478,7 +6691,8 @@ function showSplitReconciliationReport(store, pairs) {
 
   document.getElementById('recon-report-summary').textContent =
     `${fmtMonthLabel(monthKey)} · ${results.length - mismatches.length} of ${results.length} SKUs match exactly` +
-    (mismatches.length ? ` · ${mismatches.length} mismatch${mismatches.length === 1 ? '' : 'es'} found — something wasn't logged` : ' · all clear');
+    (mismatches.length ? ` · ${mismatches.length} mismatch${mismatches.length === 1 ? '' : 'es'} found — something wasn't logged` : ' · all clear') +
+    (skippedCount ? ` · ${skippedCount} EU-only SKU${skippedCount === 1 ? '' : 's'} from the partner file skipped (not part of US store)` : '');
 
   document.getElementById('recon-report-body').innerHTML = results.map(r => `
     <tr>
@@ -6513,6 +6727,7 @@ function parseSplitGenericExcel(file, type, store) {
       const qtyCol = headers.find(isSplitQtyHeader);
       if (!qtyCol) { toast(`File must have a "Quantity" column — found: ${headers.join(', ')}`); return; }
       const dateCol = headers.find(isSplitDateHeader);
+      const nameCol = headers.find(isSplitNameHeader);
       const catCol = type === 'outbound' ? headers.find(h => /\b(category|type|reason)\b/i.test(String(h))) : null;
 
       const rows = [];
@@ -6525,6 +6740,10 @@ function parseSplitGenericExcel(file, type, store) {
         if (dateCol) {
           const iso = excelDateToISO(r[dateCol]);
           if (iso) row.date = iso;
+        }
+        if (nameCol) {
+          const nm = String(r[nameCol] || '').trim();
+          if (nm) row.name = nm;
         }
         if (type === 'outbound' && catCol) row.category = normalizeOutboundCategory(r[catCol]);
         rows.push(row);
@@ -6560,6 +6779,7 @@ function parseSplitImportFile(file, type, store) {
       const qtyIdx = headers.findIndex(isSplitQtyHeader);
       if (qtyIdx === -1) { toast(`File must have a "Qty" column — found: ${headers.join(', ')}`); return; }
       const dateIdx = headers.findIndex(isSplitDateHeader);
+      const nameIdx = headers.findIndex(isSplitNameHeader);
       const catIdx = type === 'outbound' ? headers.findIndex(h => /\b(category|type|reason)\b/i.test(h)) : -1;
 
       const rows = [];
@@ -6572,6 +6792,10 @@ function parseSplitImportFile(file, type, store) {
         if (dateIdx !== -1) {
           const iso = excelDateToISO(cols[dateIdx]);
           if (iso) row.date = iso;
+        }
+        if (nameIdx !== -1) {
+          const nm = cols[nameIdx] || '';
+          if (nm) row.name = nm;
         }
         if (type === 'outbound' && catIdx !== -1) row.category = normalizeOutboundCategory(cols[catIdx]);
         rows.push(row);
@@ -6597,7 +6821,7 @@ function openSplitDateModal(type, store, rows) {
   const descs = {
     sales:    `This will deduct these sales from the ${storeUpper}table for the selected day.`,
     receipts: `This will add these units to the ${storeUpper}table as a new dated delivery per SKU — earlier deliveries for the same SKU aren't overwritten.`,
-    outbound: `This will deduct these units from the ${storeUpper}table as non-store outbound stock (FBA / seeding / PR / CS / damages).`
+    outbound: `This will REPLACE any existing outbound entries already logged for the month(s) these rows fall in — Non-Store Outbound imports are treated as the complete outbound sheet for that month, not an addition to it.`
   };
   const needsCategory = type === 'outbound' && !rows.every(r => r.category);
   const rowsWithOwnDate = rows.filter(r => r.date).length;
@@ -6638,10 +6862,115 @@ function confirmSplitDateModal() {
   closeSplitDateModal();
 }
 
+// True once this SKU exists somewhere in the DayOne warehouse catalog
+// (customized or whitelabel) — the master list computeSplitLedger() builds
+// every US/EU row from. A SKU that's missing here has no row to attach to,
+// so an import against it would otherwise save silently and never appear.
+function splitSkuExistsInCatalog(sku) {
+  if (!sku) return true;
+  const dayo = ensureWHWarehouse('dayone');
+  return ['customized', 'whitelabel'].some(sec =>
+    (dayo[sec] || []).some(it => String(it.sku || '').trim() === sku));
+}
+
+// Actually adds a new SKU to the catalog — only ever called after Fifi
+// confirms in the "Registering a new product" modal below, never silently.
+// Filed under "customized" with quantity 0 (that field only drives the
+// separate DayOne Warehouse Inventory page, not this ledger) — she can
+// still add a photo or fix the name any time under Warehouse.
+function registerSplitCatalogSku(sku, name) {
+  const dayo = ensureWHWarehouse('dayone');
+  dayo.customized.unshift({
+    id: uid('wh_'),
+    sku,
+    name: name || sku,
+    photo: '',
+    quantity: 0,
+    transferredToDayOne: 0
+  });
+}
+
+// Entry point for all three import types. If every SKU in the file is
+// already known, it commits immediately. If any SKU isn't in the DayOne
+// catalog yet, it pauses and shows the "Registering a new product" modal
+// instead of creating anything — the import only proceeds once Fifi clicks
+// Register & Import (or is dropped entirely if she cancels).
 function applySplitImport(type, store, rows, iso, categorySel) {
+  const seenSkus = new Set();
+  const newSkus = [];
+  rows.forEach(r => {
+    if (seenSkus.has(r.sku)) return;
+    seenSkus.add(r.sku);
+    if (!splitSkuExistsInCatalog(r.sku)) newSkus.push({ sku: r.sku, name: r.name || '' });
+  });
+
+  if (newSkus.length) {
+    _splitNewSkuPending = { type, store, rows, iso, categorySel, newSkus };
+    openSplitNewSkuModal(store, newSkus);
+    return;
+  }
+  commitSplitImport(type, store, rows, iso, categorySel, []);
+}
+
+function openSplitNewSkuModal(store, newSkus) {
+  const storeUpper = store.toUpperCase();
+  const plural = newSkus.length !== 1;
+  document.getElementById('split-newsku-title').textContent =
+    `🆕 Registering ${plural ? `${newSkus.length} new products` : 'a new product'} in the ${storeUpper} Store`;
+  document.getElementById('split-newsku-desc').textContent =
+    `${plural ? 'These SKUs are' : 'This SKU is'} not in the DayOne catalog yet — ${plural ? 'they' : 'it'} won't show up on any tab until added. Confirm to register ${plural ? 'them' : 'it'} and continue the import.`;
+  document.getElementById('split-newsku-list').innerHTML = newSkus.map(s => `
+    <div style="padding:4px 0;">
+      <strong>${escapeHtml(s.sku)}</strong>${s.name
+        ? ' — ' + escapeHtml(s.name)
+        : ' <span style="color:var(--ink-mute);">(no product name in the file — SKU will be used as the name)</span>'}
+    </div>`).join('');
+  document.getElementById('split-newsku-overlay').style.display = 'flex';
+}
+
+function cancelSplitNewSkuModal() {
+  _splitNewSkuPending = null;
+  document.getElementById('split-newsku-overlay').style.display = 'none';
+  toast('Import cancelled — nothing was registered or imported');
+}
+
+function confirmSplitNewSkuModal() {
+  if (!_splitNewSkuPending) { document.getElementById('split-newsku-overlay').style.display = 'none'; return; }
+  const { type, store, rows, iso, categorySel, newSkus } = _splitNewSkuPending;
+  _splitNewSkuPending = null;
+  document.getElementById('split-newsku-overlay').style.display = 'none';
+  newSkus.forEach(s => registerSplitCatalogSku(s.sku, s.name));
+  commitSplitImport(type, store, rows, iso, categorySel, newSkus.map(s => s.sku));
+}
+
+function commitSplitImport(type, store, rows, iso, categorySel, newlyRegistered) {
   const t = ensureSplitTracker();
+  const viewedMonth = getSplitSelectedMonth(store);
+
+  // Which month(s) this import actually covers, using each row's own date
+  // where given and the shared-modal date as the fallback — computed up
+  // front since the outbound overwrite (right below) needs to know this
+  // BEFORE anything gets pushed.
+  const importedMonths = new Set();
+  rows.forEach(r => {
+    const rowDate = r.date || iso;
+    if (rowDate) importedMonths.add(splitMonthKey(rowDate));
+  });
+
+  // Non-Store Outbound imports represent the COMPLETE outbound sheet for
+  // whichever month(s) they cover — Fifi only ever keeps one outbound sheet
+  // per month — so re-importing (a correction, an updated export, etc.)
+  // should REPLACE that month's existing outbound entries rather than pile
+  // on top of them, unlike Units Received, where multiple separate
+  // deliveries landing in the same month are expected and kept side by side.
+  let replacedCount = 0;
+  if (type === 'outbound' && importedMonths.size) {
+    const before = t[store].outbound.length;
+    t[store].outbound = t[store].outbound.filter(e => !importedMonths.has(splitMonthKey(e.date)));
+    replacedCount = before - t[store].outbound.length;
+  }
+
   const bucket = type === 'sales' ? t[store].sales : type === 'receipts' ? t[store].receipts : t[store].outbound;
-  let lastMonthKey = null;
   rows.forEach(r => {
     // Each row's own Date column value wins when the file provided one;
     // otherwise fall back to the date picked in the shared modal.
@@ -6650,9 +6979,14 @@ function applySplitImport(type, store, rows, iso, categorySel) {
     const entry = { id: uid('spl_'), date: rowDate, sku: r.sku, qty: r.qty };
     if (type === 'outbound') entry.category = r.category || categorySel || 'Other';
     bucket.push(entry);
-    lastMonthKey = splitMonthKey(rowDate);
   });
-  if (lastMonthKey) splitTrackerMonth[store] = lastMonthKey;
+  // Deliberately NOT touching splitTrackerMonth here. This used to jump the
+  // visible month to match the last imported row every time, which looked
+  // exactly like "everything cleared out" whenever Fifi had a different
+  // month selected — nothing was actually lost, the view had just silently
+  // switched to a different, mostly-empty month. Whatever month she's
+  // looking at stays selected; the toast below says if she needs to switch
+  // to actually see what just landed.
   saveState();
   render();
   const verb = type === 'sales' ? 'sales row' : type === 'receipts' ? 'units-received row' : 'non-store outbound row';
@@ -6660,7 +6994,17 @@ function applySplitImport(type, store, rows, iso, categorySel) {
   const dateLabel = usedOwnDates
     ? (rows.every(r => r.date) ? 'using each row\'s own date' : `using each row's own date where given, ${iso} otherwise`)
     : iso;
-  toast(`Imported ${rows.length} ${verb}${rows.length === 1 ? '' : 's'} for ${store.toUpperCase()} Store · ${dateLabel}`);
+  const newSkuLabel = newlyRegistered.length
+    ? ` · ${newlyRegistered.length} new SKU${newlyRegistered.length === 1 ? '' : 's'} registered: ${newlyRegistered.join(', ')}`
+    : '';
+  const replacedLabel = replacedCount
+    ? ` · replaced ${replacedCount} existing outbound entr${replacedCount === 1 ? 'y' : 'ies'} for ${Array.from(importedMonths).map(fmtMonthLabel).join(' / ')}`
+    : '';
+  const elsewhereMonths = Array.from(importedMonths).filter(m => m !== viewedMonth);
+  const monthNote = elsewhereMonths.length
+    ? ` · you're viewing ${fmtMonthLabel(viewedMonth)} — switch to ${elsewhereMonths.map(fmtMonthLabel).join(' / ')} to see ${elsewhereMonths.length === 1 && importedMonths.size === 1 ? 'it' : 'these rows'}`
+    : '';
+  toast(`Imported ${rows.length} ${verb}${rows.length === 1 ? '' : 's'} for ${store.toUpperCase()} Store · ${dateLabel}${newSkuLabel}${replacedLabel}${monthNote}`);
 }
 
 
@@ -11248,6 +11592,15 @@ function attachInlineHandlers() {
     el.addEventListener('click', (e) => {
       e.preventDefault();
       deleteSplitReceiptEntry(el.dataset.store, el.dataset.id);
+    });
+  });
+
+  // Split Sales Tracker — remove one dated Outbound entry the same way
+  // (the "✕" next to "−123 pcs · FBA · Aug 1").
+  document.querySelectorAll('.split-outbound-delete[data-id]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.preventDefault();
+      deleteSplitOutboundEntry(el.dataset.store, el.dataset.id);
     });
   });
 
