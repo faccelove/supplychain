@@ -8044,6 +8044,153 @@ function updateWarehouseReorderBanner(visible) {
 }
 
 /**
+ * Same reorder banner as buildWarehouseReorderBannerHTML(), but built off
+ * getCombinedWarehouseReorderAmazon() — ADS bumped by the 25% Amazon
+ * projection before Days of Cover / status are computed — so it belongs on
+ * the "Average Daily Sales (incl. Amazon Projection)" tab instead of the
+ * warehouse views. A SKU can show up here (or hit REORDER/CRITICAL sooner)
+ * even when it still looks healthy on the plain warehouse banner, since the
+ * projected Amazon demand eats into cover faster. Returns '' if there are
+ * no main products tracked yet.
+ */
+function buildAmazonReorderBannerHTML() {
+  const combined = getCombinedWarehouseReorderAmazon();
+  if (combined.length === 0) return '';
+
+  const order = { out: 0, critical: 1, reorder: 2, pipeline: 3, healthy: 4 };
+  const attention = combined
+    // Also surface SKUs whose aggregate "incl. prod" cover looks fine but
+    // which have a stockout gap between two incoming deliveries — otherwise
+    // a healthy-looking total masks a real interim OOS window.
+    .filter(p => p.status !== 'healthy' || p.hasDeliveryGap)
+    .sort((a, b) => order[a.status] - order[b.status] || a.daysImmediate - b.daysImmediate);
+  const statusLabel = { healthy:'Healthy', reorder:'Reorder', critical:'Critical', out:'Out', pipeline:'In Pipeline' };
+
+  // Same expedite-only carve-out as the plain banner (see
+  // buildWarehouseReorderBannerHTML for the full rationale) — a SKU whose
+  // TOTAL (stock + production) already clears the reorder threshold, or
+  // whose supply is just sequenced badly across batches, needs its existing
+  // PO expedited rather than a new one placed.
+  const isExpediteOnly = p => (p.status === 'critical' && p.inProductionQty > 0 && p.daysTotal > REORDER_DAYS - EXPEDITE_ONLY_TOLERANCE_DAYS)
+    || (p.hasDeliveryGap && p.status !== 'out' && p.status !== 'reorder');
+
+  const mainList     = attention.filter(p => !isExpediteOnly(p));
+  const needsReorder = mainList.filter(p => p.status !== 'pipeline');
+  const pipelineOnly = mainList.filter(p => p.status === 'pipeline');
+  const expediteOnly = attention.filter(isExpediteOnly);
+
+  const renderRow = (p, variant) => `
+    <div class="wh-reorder-row">
+      <div class="wh-reorder-row-photo">
+        ${p.photo
+          ? `<img src="${escapeAttr(p.photo)}" alt="">`
+          : `<span class="wh-reorder-row-photo-empty">📦</span>`}
+      </div>
+      <div class="wh-reorder-row-info">
+        <div class="wh-reorder-row-sku">${getSkuFamily(p.sku).map(escapeHtml).join(' + ')}</div>
+        <div class="wh-reorder-row-name">${escapeHtml(p.name)}</div>
+      </div>
+      <div class="wh-reorder-row-metric">
+        <span class="wh-reorder-row-metric-label">Total Stock</span>
+        <span class="wh-reorder-row-metric-value">${fmtNum(p.stock)}</span>
+        <span class="wh-reorder-row-metric-sub">${p.bsQty > 0 ? `${fmtNum(p.bsQty)} BS · ` : ''}${fmtNum(p.dayoneQty)} DayOne</span>
+      </div>
+      <div class="wh-reorder-row-metric">
+        <span class="wh-reorder-row-metric-label">ADS incl. AMZN</span>
+        <span class="wh-reorder-row-metric-value">${p.adsN.toFixed(1)}</span>
+        <span class="wh-reorder-row-metric-sub">normal ${p.adsNormal.toFixed(1)} · +25%</span>
+      </div>
+      <div class="wh-reorder-row-metric">
+        <span class="wh-reorder-row-metric-label">Days of Cover</span>
+        <span class="wh-reorder-row-metric-value">${fmtDays(p.daysImmediate)}</span>
+        ${p.inProductionQty > 0 ? `
+          <span class="wh-reorder-row-metric-incl">incl. prod: <strong>${fmtDays(p.daysTotal)}</strong></span>
+          ${(() => {
+            const breakdown = renderDeliveryBreakdown(p.batches, p.adsN, p.daysImmediate);
+            if (breakdown) return breakdown;
+            if (!p.soonestPromise) return '';
+            const nextDate = p.soonestPromise instanceof Date ? p.soonestPromise : parseDate(p.soonestPromise);
+            if (!nextDate) return '';
+            const days = Math.round((nextDate - Date.now()) / 86400000);
+            if (days < 0) return ''; // overdue — hide; presumably already handled
+            const rel = days === 0 ? 'today' : `in ${days}d`;
+            return `<span class="wh-reorder-row-metric-sub">next delivery: ${escapeHtml(fmtDateDisplay(nextDate))} · ${rel}</span>`;
+          })()}
+        ` : ''}
+      </div>
+      ${variant === 'expedite' ? (() => {
+        // If the SKU's problem is a delivery-sequencing gap, list every
+        // incoming delivery with its own countdown (not just the first),
+        // so it's clear WHICH delivery the shelf won't survive until —
+        // showing only the worst gap's date was confusing when an earlier,
+        // perfectly-fine delivery is also on the way.
+        if (p.hasDeliveryGap) {
+          const ord = i => (i === 1 ? '1st' : i === 2 ? '2nd' : i === 3 ? '3rd' : `${i}th`);
+          const timeline = computeDeliveryTimeline(p.batches, p.adsN, p.daysImmediate);
+          const deliveryLines = timeline.map(t => {
+            const when = t.daysFromNow == null ? 'TBD' : (t.daysFromNow === 0 ? 'today' : `in ${t.daysFromNow}d`);
+            return `${ord(t.index)} delivery ${when}`;
+          }).join('<br>');
+          const gapLines = timeline.filter(t => t.hasGap)
+            .map(t => `OOS ~${t.gapDays}d before ${ord(t.index)} delivery`)
+            .join('<br>');
+          return `<span class="status status-expedite" style="display:block; white-space:normal; text-align:right; line-height:1.35;">
+            ${deliveryLines}${gapLines ? `<br><span style="font-size:11px;">${gapLines}</span>` : ''}
+          </span>`;
+        }
+        const hasPromise = p.daysToArrival !== null;
+        const relief    = hasPromise ? p.daysToArrival : (p.leadDays || DEFAULT_LEAD_DAYS);
+        const daysToArr = Math.max(0, Math.round(relief));
+        const oosDays   = Math.max(0, Math.round(relief - Math.max(0, p.daysImmediate)));
+        const deliveryIn = daysToArr === 0 ? 'today' : `in ${daysToArr}d`;
+        return `<span class="status status-expedite" style="display:block; white-space:normal; text-align:right; line-height:1.35;">
+          ${hasPromise ? 'Delivery' : '~Delivery'} ${deliveryIn}${oosDays > 0 ? `<br><span style="font-size:11px;">OOS ${oosDays}d before arrival</span>` : ''}
+        </span>`;
+      })() : p.status === 'pipeline' && p.soonestPromise && p.daysToArrival !== null ? (() => {
+        const nextDate = p.soonestPromise instanceof Date ? p.soonestPromise : parseDate(p.soonestPromise);
+        const daysToArr = Math.round(p.daysToArrival);
+        const oosDays = Math.round(daysToArr - Math.max(0, p.daysImmediate));
+        const deliveryIn = daysToArr === 0 ? 'today' : `in ${daysToArr}d`;
+        return `<span class="status status-pipeline" style="display:block; white-space:normal; text-align:right; line-height:1.35;">
+          Delivery ${deliveryIn}${oosDays > 0 ? `<br><span style="font-size:11px;">OOS ${oosDays}d before arrival</span>` : ''}
+        </span>`;
+      })() : `<span class="status status-${p.status}">${statusLabel[p.status]}</span>`}
+    </div>`;
+
+  const reorderRows  = mainList.map(p => renderRow(p, 'default')).join('');
+  const expediteRows = expediteOnly.map(p => renderRow(p, 'expedite')).join('');
+  const hasExpedite  = expediteOnly.length > 0;
+
+  const hasReorder = needsReorder.length > 0;
+  return `
+    <details class="wh-reorder-banner ${hasReorder ? 'has-attention' : 'all-clear'}">
+      <summary class="wh-reorder-banner-summary">
+        <span class="wh-reorder-banner-icon">${hasReorder ? '🔁' : '✓'}</span>
+        <span class="wh-reorder-banner-count">${needsReorder.length}</span>
+        <span class="wh-reorder-banner-label">
+          ${hasReorder
+            ? (needsReorder.length === 1 ? 'product needs reorder' : 'products need reorder')
+            : ((pipelineOnly.length > 0 || hasExpedite) ? 'no new reorders needed' : 'no reorders needed yet')}
+        </span>
+        <span class="wh-reorder-banner-meta">combined BS + DayOne · incl. 25% Amazon proj. · ${combined.length} SKU${combined.length === 1 ? '' : 's'} tracked${pipelineOnly.length ? ` · ${pipelineOnly.length} already in production` : ''}${hasExpedite ? ` · ${expediteOnly.length} need${expediteOnly.length === 1 ? 's' : ''} expediting` : ''}</span>
+        <span class="wh-reorder-banner-chevron">
+          <span class="chev-text-closed">Click to view</span>
+          <span class="chev-text-open">Hide</span>
+          <span class="chev-arrow">▾</span>
+        </span>
+      </summary>
+      <div class="wh-reorder-banner-body">
+        ${mainList.length > 0 ? reorderRows : (hasExpedite ? '' : `<div class="wh-reorder-empty">Every main product is above the ${REORDER_DAYS}-day cover threshold (incl. Amazon projection) across both warehouses. Nothing to reorder right now.</div>`)}
+        ${hasExpedite ? `
+          <div class="wh-reorder-expedite-heading">⏱ Needs expediting before next delivery</div>
+          <div class="wh-reorder-expedite-note">Already enough production incoming to clear ${REORDER_DAYS} days of cover (incl. Amazon projection) once it lands — no new order needed. But either the current batch won't arrive before the shelf hits zero, or a later batch in the pipeline won't arrive before an earlier one runs out — so push the supplier to speed up delivery.</div>
+          ${expediteRows}
+        ` : ''}
+      </div>
+    </details>`;
+}
+
+/**
  * Parse a product name into base + shade. The shade is whatever sits inside
  * the LAST trailing parenthesised group: "Eyeshadow Stick (Bronzed Elegance)"
  *   → { base: "Eyeshadow Stick", shade: "Bronzed Elegance" }.
@@ -10661,6 +10808,7 @@ function renderSalesAmazon() {
       <h1 class="page-title">📦 Average Daily Sales (incl. Amazon Projection)</h1>
       <p class="page-subtitle">Same as Average Daily Sales, plus a 25% Amazon projection on top of normal sales · Days of Cover here uses the combined ADS · stores up to 30 days of history</p>
     </div>
+    ${buildAmazonReorderBannerHTML()}
     ${anchorBar}
     ${body}
     <div class="section-header" style="margin-top: 32px;">
