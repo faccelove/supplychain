@@ -3188,6 +3188,24 @@
     display: flex; flex-direction: column; gap: 3px;
     min-width: 0;
   }
+  /* Shopify Health Check notification banner — a plain two-part flex row
+     (SKU/name info + a small "See" button), not the 6-column grid layout
+     .wh-reorder-row uses for the warehouse banner's photo/metrics row. */
+  .health-notif-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 14px;
+    padding: 10px 8px;
+    border-radius: var(--radius);
+    transition: background 0.15s ease;
+  }
+  .health-notif-row:hover { background: var(--lavender-faint); }
+  .health-notif-row + .health-notif-row { border-top: 1px solid var(--line-soft); }
+  .health-notif-row .wh-reorder-row-info { flex: 1; min-width: 0; }
+  .health-notif-see {
+    flex-shrink: 0;
+    font-size: 11px;
+    padding: 6px 14px;
+  }
   .wh-reorder-row-sku {
     font-size: 10px;
     font-weight: 700;
@@ -8031,23 +8049,23 @@ function buildHealthCheckNotificationHTML(reorderNowRows, expediteRows) {
         ${reorderNowRows.length > 0 ? `
           <div class="wh-reorder-expedite-heading">🔴 Needs reorder now</div>
           ${reorderNowRows.map(sim => `
-            <div class="wh-reorder-row">
-              <div class="wh-reorder-row-info" style="flex:1;">
+            <div class="health-notif-row">
+              <div class="wh-reorder-row-info">
                 <div class="wh-reorder-row-sku">${escapeHtml(sim.sku)}</div>
                 <div class="wh-reorder-row-name">${escapeHtml(sim.name)}</div>
               </div>
-              <button class="btn btn-ghost" style="font-size:11px;" onclick="goToHealthCheckSku('${escapeAttr(sim.sku)}')">See →</button>
+              <button class="btn btn-ghost health-notif-see" onclick="goToHealthCheckSku('${escapeAttr(sim.sku)}')">See →</button>
             </div>`).join('')}
         ` : ''}
         ${expediteRows.length > 0 ? `
           <div class="wh-reorder-expedite-heading">⏱ Needs expediting</div>
           ${expediteRows.map(sim => `
-            <div class="wh-reorder-row">
-              <div class="wh-reorder-row-info" style="flex:1;">
+            <div class="health-notif-row">
+              <div class="wh-reorder-row-info">
                 <div class="wh-reorder-row-sku">${escapeHtml(sim.sku)}</div>
                 <div class="wh-reorder-row-name">${escapeHtml(sim.name)} — needs ${fmtNum(sim.health.qty)} pcs expedited by ${sim.health.neededBy.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</div>
               </div>
-              <button class="btn btn-ghost" style="font-size:11px;" onclick="goToHealthCheckSku('${escapeAttr(sim.sku)}')">See →</button>
+              <button class="btn btn-ghost health-notif-see" onclick="goToHealthCheckSku('${escapeAttr(sim.sku)}')">See →</button>
             </div>`).join('')}
         ` : ''}
         ${!hasAttention ? `<div class="wh-reorder-empty">No Amazon-scheduled SKU needs reorder or expediting right now.</div>` : ''}
