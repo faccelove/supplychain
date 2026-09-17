@@ -1496,6 +1496,7 @@
   .pay-paiddue-badge { white-space: normal; line-height: 1.4; }
   .pay-paiddue-paid { background: var(--status-healthy-bg); color: var(--status-healthy); }
   .pay-paiddue-due  { background: var(--status-critical-bg); color: var(--status-critical); }
+  .pay-paiddue-depositonly { background: var(--status-reorder-bg); color: var(--status-reorder); }
 
   /* Payment Tracker's 5 sub-tabs, rendered inline directly above the table */
   .pay-subtabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 16px; }
@@ -4022,6 +4023,7 @@
     <button class="nav-item" data-view="paymentSchedule"><span class="nav-emoji">💰</span> Payment Tracker <span class="nav-count" id="nav-count-pay">0</span></button>
     <button class="nav-item" data-view="productionSchedule"><span class="nav-emoji">🗓️</span> Production Schedule</button>
     <button class="nav-item" data-view="dashboard"><span class="nav-emoji">📊</span> Analytics Dashboard</button>
+    <button class="nav-item" data-view="amazonImpact"><span class="nav-emoji">🛒</span> Shopify Inventory Health Check After Amazon Shipment</button>
     <button class="nav-item" data-view="sales"><span class="nav-emoji">📈</span> Avg Daily Sales <span class="nav-count" id="nav-count-sales">0</span></button>
     <button class="nav-item" data-view="salesAmazon"><span class="nav-emoji">📦</span> Avg Daily Sales (incl. Amazon)</button>
     <button class="nav-item" data-view="production"><span class="nav-emoji">🏭</span> Current Production <span class="nav-count" id="nav-count-prod">0</span></button>
@@ -4309,6 +4311,19 @@
    ========================================================================== */
 
 const REORDER_DAYS = 45;
+// Default lead time (days before a scheduled Amazon ship date) at which an
+// earmarked shipment starts counting as "due" against DayOne's immediate
+// available stock. Before this window, the units are committed but not yet
+// packed/moving, so they shouldn't trigger a false "stock is short" alarm —
+// see getPendingAmazonHoldsBySku(). Editable per-account via
+// state.amazonBufferDays; this is only the fallback default.
+const AMAZON_BUFFER_DAYS_DEFAULT = 5;
+// Default reorder trigger for the Shopify Health Check tab's "reorder by"
+// date: once the known future pipeline (production + Amazon shipments) is
+// exhausted, this is how many days of cover you want left at that point
+// before you must place a new order. Editable per-account via
+// state.reorderTriggerDays; this is only the fallback default.
+const REORDER_TRIGGER_DAYS_DEFAULT = 38;
 const TARGET_AFTER_ARRIVAL = 90;
 const DEFAULT_LEAD_DAYS = 30;
 // A "critical" SKU with a batch already in production, whose total cover
@@ -4356,7 +4371,9 @@ let state = {
   adsReport: null,
   adsSKURegistry: [],  // fixed SKU allowlist — {sku, name}
   phasedOutWH: [],  // items phased out from warehouse inventory (not deleted, just hidden from active lists)
-  toShipAmazon: []  // pending Amazon shipments — units still physically at DayOne but earmarked, so we deduct them from DayOne's effective stock until marked shipped
+  toShipAmazon: [],  // pending Amazon shipments — units still physically at DayOne but earmarked, so we deduct them from DayOne's effective stock until marked shipped
+  amazonBufferDays: AMAZON_BUFFER_DAYS_DEFAULT,  // days before a shipment's ship date that it starts counting as "due" for immediate-stock purposes
+  reorderTriggerDays: REORDER_TRIGGER_DAYS_DEFAULT  // Shopify Health Check tab: desired days of cover left once the known pipeline runs out
 };
 
 let currentView = 'inventoryDayOne';
@@ -4364,6 +4381,7 @@ let activeOrderSku = null;
 let pendingImportTarget = null;
 let pendingPOFileTarget = null;
 let pendingPhotoTarget = null;
+let pendingHealthCheckFocusSku = null; // sku to scroll to + auto-open the chart for, next time the amazonImpact view renders
 
 // US EU Split Sales Tracker — transient state. _splitPendingImport holds the
 // parsed rows awaiting date (and, for outbound, category) confirmation in
@@ -4405,6 +4423,73 @@ let combineSearch = '';
 let combineCalcAmazon = { skus: [] };
 let combineSearchAmazon = '';
 
+// Shared by renderDashboard() and dashFilter() so the two stay in sync. A
+// SKU with a pending Amazon shipment gets Days of Cover / Status / Action
+// merged into one redirect button — the flat number for those three
+// columns can't be trusted once an Amazon shipment is sequenced in (see
+// classifyAmazonHealthSku / the Shopify Health Check tab), so rather than
+// show a possibly-wrong figure, send the user to the tab that computes it
+// properly.
+function renderDashboardRow(p, adsDays, amazonSkuSet) {
+  const statusOrderMap = { critical: 0, out: 1, reorder: 2, pipeline: 3, healthy: 4 };
+  const inProdCell = p.inProductionQty > 0
+    ? `<div>${fmtNum(p.inProductionQty)}</div>${p.soonestPromise ? `<div class="pipeline-meta">${escapeHtml(fmtDateRelative(p.soonestPromise))}</div>` : ''}`
+    : `<span style="color:var(--ink-mute)">—</span>`;
+
+  let tailCells;
+  if (amazonSkuSet.has(p.sku)) {
+    tailCells = `<td colspan="3" class="days-cell" data-label="Shopify Health Check" style="text-align:center;">
+      <button class="btn btn-ghost" style="font-size:11px;" onclick="goToHealthCheckSku('${escapeAttr(p.sku)}')">🛒 See in Shopify Health Check →</button>
+    </td>`;
+  } else {
+    const barPct = Math.min(100, Math.max(2, (p.daysTotal / 180) * 100));
+    const barColor = p.status === 'healthy' ? 'var(--status-healthy)'
+                   : p.status === 'reorder' ? 'var(--status-reorder)'
+                   : p.status === 'pipeline' ? 'var(--status-pipeline)'
+                   : p.status === 'critical' ? 'var(--status-critical)'
+                   : 'var(--status-out)';
+    let actionBtn;
+    if (p.inProductionQty > 0) {
+      actionBtn = '<button class="action-btn pending" disabled title="Order already in production">In Production</button>';
+    } else if (p.status === 'healthy') {
+      actionBtn = '<button class="action-btn disabled" disabled>No Action Needed</button>';
+    } else {
+      const cls = p.status === 'critical' || p.status === 'out' ? 'crit' : 'warn';
+      actionBtn = `<button class="action-btn ${cls}" onclick="openOrder('${escapeAttr(p.sku)}')">Place Order</button>`;
+    }
+    const statusLabel = { healthy:'Healthy', reorder:'Reorder Now', critical:'Critical', out:'Out of Stock', pipeline:'In Pipeline' }[p.status];
+    tailCells = `
+        <td class="days-cell" data-label="Days of Cover" data-sort-value="${isFinite(p.daysImmediate) ? p.daysImmediate : 99999}">
+          ${renderDaysOfCoverBlock(p.daysImmediate, p.daysTotal, p.inProductionQty, p.soonestPromise, p.batches, p.adsN)}
+          <div class="days-bar"><div class="days-bar-fill" style="width:${barPct}%; background:${barColor};"></div></div>
+        </td>
+        <td data-label="Status" data-sort-value="${statusOrderMap[p.status]}"><span class="status status-${p.status}">${statusLabel}</span></td>
+        <td data-label="Action">${actionBtn}</td>`;
+  }
+
+  return `
+    <tr>
+      <td class="product-cell" data-label="Product">${escapeHtml(p.name)}${renderSkuTags(p)}</td>
+      <td class="numeric" data-label="Ready Stock">
+        <input type="number" class="stock-edit" value="${p.readyStock}" min="0"
+               data-sku="${escapeAttr(p.sku)}" data-product-name="${escapeAttr(p.name)}" onclick="this.select()">
+      </td>
+      <td class="numeric" data-label="In Production">${inProdCell}</td>
+      <td class="numeric" data-label="ADS ${adsDays}d"><strong style="color:var(--ink)">${p.adsN.toFixed(1)}</strong></td>
+      ${tailCells}
+      ${dashboardEditActive ? `<td data-label="" class="dashboard-row-delete-cell"><button class="dashboard-row-delete" title="Hide this row from the dashboard" onclick="hideDashboardRow('${escapeAttr(p.sku)}')">✕</button></td>` : ''}
+    </tr>`;
+}
+
+// Redirect used by Dashboard/ADS/ADS-incl-Amazon for a SKU with a pending
+// Amazon shipment: jump to the Health Check tab, scroll straight to that
+// SKU's card, and open its timeline graph — see the pendingHealthCheckFocusSku
+// hook in render().
+function goToHealthCheckSku(sku) {
+  pendingHealthCheckFocusSku = sku;
+  setView('amazonImpact');
+}
+
 function dashFilter(term) {
   dashSearch = term;
   const tbody = document.getElementById('dash-tbody');
@@ -4419,37 +4504,9 @@ function dashFilter(term) {
     .filter(p => !t || p.name.toLowerCase().includes(t) || p.sku.toLowerCase().includes(t))
     .sort((a, b) => statusOrder[a.status] - statusOrder[b.status] || a.daysImmediate - b.daysImmediate);
 
-  let rows = '';
-  visible.forEach(p => {
-    const barPct = Math.min(100, Math.max(2, (p.daysTotal / 180) * 100));
-    const barColor = p.status === 'healthy' ? 'var(--status-healthy)'
-                   : p.status === 'reorder' ? 'var(--status-reorder)'
-                   : p.status === 'pipeline' ? 'var(--status-pipeline)'
-                   : p.status === 'critical' ? 'var(--status-critical)'
-                   : 'var(--status-out)';
-    let actionBtn;
-    if (p.inProductionQty > 0) {
-      actionBtn = '<button class="action-btn pending" disabled>In Production</button>';
-    } else if (p.status === 'healthy') {
-      actionBtn = '<button class="action-btn disabled" disabled>No Action Needed</button>';
-    } else {
-      const cls = p.status === 'critical' || p.status === 'out' ? 'crit' : 'warn';
-      actionBtn = '<button class="action-btn ' + cls + '" onclick="openOrder(\'' + escapeAttr(p.sku) + '\')">Place Order</button>';
-    }
-    const inProdCell = p.inProductionQty > 0
-      ? '<div>' + fmtNum(p.inProductionQty) + '</div>' + (p.soonestPromise ? '<div class="pipeline-meta">' + escapeHtml(fmtDateRelative(p.soonestPromise)) + '</div>' : '')
-      : '<span style="color:var(--ink-mute)">\u2014</span>';
-    const statusLabel = { healthy:'Healthy', reorder:'Reorder Now', critical:'Critical', out:'Out of Stock', pipeline:'In Pipeline' }[p.status];
-    rows += '<tr>'
-      + '<td class="product-cell">' + escapeHtml(p.name) + renderSkuTags(p) + '</td>'
-      + '<td class="numeric"><input type="number" class="stock-edit" value="' + p.readyStock + '" min="0" data-sku="' + escapeAttr(p.sku) + '" data-product-name="' + escapeAttr(p.name) + '" onclick="this.select()"></td>'
-      + '<td class="numeric">' + inProdCell + '</td>'
-      + '<td class="numeric"><strong style="color:var(--ink)">' + p.adsN.toFixed(1) + '</strong></td>'
-      + '<td class="days-cell">' + renderDaysOfCoverBlock(p.daysImmediate, p.daysTotal, p.inProductionQty, p.soonestPromise, p.batches, p.adsN) + '<div class="days-bar"><div class="days-bar-fill" style="width:' + barPct + '%;background:' + barColor + ';"></div></div></td>'
-      + '<td><span class="status status-' + p.status + '">' + statusLabel + '</span></td>'
-      + '<td>' + actionBtn + '</td>'
-      + '</tr>';
-  });
+  const adsDays = state.salesViewDays || 3;
+  const amazonSkuSet = getAmazonScheduledSkuSet();
+  const rows = visible.map(p => renderDashboardRow(p, adsDays, amazonSkuSet)).join('');
   tbody.innerHTML = rows || '<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--ink-mute)">No products match &ldquo;' + escapeHtml(term) + '&rdquo;</td></tr>';
 }
 
@@ -4529,11 +4586,15 @@ function applyRemoteState(parsed) {
     warehouseInventory: { bs: {}, dayone: {} },
     phasedOutWH: [],
     toShipAmazon: [],
+    amazonBufferDays: AMAZON_BUFFER_DAYS_DEFAULT,
+    reorderTriggerDays: REORDER_TRIGGER_DAYS_DEFAULT,
     splitTracker: { us: { openings: {}, receipts: [], sales: [], outbound: [] }, eu: { openings: {}, receipts: [], sales: [], outbound: [] } },
     ...parsed
   };
   if (!Array.isArray(state.phasedOutWH)) state.phasedOutWH = [];
   if (!Array.isArray(state.toShipAmazon)) state.toShipAmazon = [];
+  if (!isFinite(+state.amazonBufferDays) || +state.amazonBufferDays < 0) state.amazonBufferDays = AMAZON_BUFFER_DAYS_DEFAULT;
+  if (!isFinite(+state.reorderTriggerDays) || +state.reorderTriggerDays < 0) state.reorderTriggerDays = REORDER_TRIGGER_DAYS_DEFAULT;
   if (!Array.isArray(state.oneTimeInvoices)) state.oneTimeInvoices = [];
   ensureSplitTracker();
   if (Array.isArray(state.products)) state.products = {};
@@ -5358,17 +5419,60 @@ function getPhasedOutSkuSet() {
   return set;
 }
 
+function getAmazonBufferDays() {
+  const n = +state.amazonBufferDays;
+  return isFinite(n) && n >= 0 ? n : AMAZON_BUFFER_DAYS_DEFAULT;
+}
+
+function getReorderTriggerDays() {
+  const n = +state.reorderTriggerDays;
+  return isFinite(n) && n >= 0 ? n : REORDER_TRIGGER_DAYS_DEFAULT;
+}
+
+function updateReorderTriggerDays(val) {
+  const n = +val;
+  state.reorderTriggerDays = isFinite(n) && n >= 0 ? n : REORDER_TRIGGER_DAYS_DEFAULT;
+  saveState();
+  render();
+}
+
+// A shipment "counts" against immediate available stock once we're within
+// its packing/pick buffer of the scheduled ship date — not the moment it's
+// earmarked. A shipment with no ship date on file behaves like before
+// (always due), so legacy entries and undated imports don't silently stop
+// deducting.
+function isAmazonHoldDue(item, now) {
+  if (!item.shipDate) return true;
+  const shipDate = parseDate(item.shipDate);
+  if (!shipDate) return true;
+  now = now || new Date();
+  const dueFrom = new Date(shipDate.getTime() - getAmazonBufferDays() * 86400000);
+  return now.getTime() >= dueFrom.getTime();
+}
+
 // Sum of not-yet-shipped Amazon-bound quantities per SKU. These units are
 // still physically sitting at DayOne (DayOne's own daily sync won't drop
-// them until the shipment actually leaves), so every place that reads DayOne
-// stock for analytics purposes subtracts this to avoid a false "still fully
-// available" reading. Once an entry is marked shipped, it drops out of this
-// sum — from that point DayOne's own sync is trusted to reflect the real
+// them until the shipment actually leaves), so places that need the full
+// forward commitment (reorder planning, the reorder report — "will my
+// stock + incoming production cover everything I've promised Amazon?")
+// read this with no options, and get every pending hold regardless of date.
+//
+// Places that need *today's* physically-available stock (the Warehouse
+// card, the dashboard's current-stock figure, the "critical/out of stock"
+// alarm) pass { dueOnly: true } so a shipment scheduled weeks out — still
+// under production, not yet packed — doesn't get subtracted before it's
+// actually due. See isAmazonHoldDue() for the buffer window.
+//
+// Once an entry is marked shipped, it drops out of this sum entirely —
+// from that point DayOne's own sync is trusted to reflect the real
 // reduction, so no further manual subtraction is applied.
-function getPendingAmazonHoldsBySku() {
+function getPendingAmazonHoldsBySku(opts) {
+  const dueOnly = !!(opts && opts.dueOnly);
+  const now = new Date();
   const map = new Map();
   (state.toShipAmazon || []).forEach(h => {
     if (h.shipped || !h.sku) return;
+    if (dueOnly && !isAmazonHoldDue(h, now)) return;
     map.set(h.sku, (map.get(h.sku) || 0) + (+h.quantity || 0));
   });
   return map;
@@ -5432,9 +5536,14 @@ function getProductRollup() {
   });
 
   // Units earmarked for Amazon but not yet physically shipped still sit in
-  // DayOne's raw count — subtract them here so readyStock (and everything
-  // derived from it: dashboard, reorder status) reflects real availability.
-  const amazonHolds = getPendingAmazonHoldsBySku();
+  // DayOne's raw count — subtract the ones that are actually due (see
+  // isAmazonHoldDue) so readyStock (and the dashboard's current-stock
+  // figure) reflects real, physically available-today stock rather than
+  // flagging shipments still weeks out. The raw (undiminished) figure is
+  // kept separately below so p.totalStock/p.daysTotal can net out *every*
+  // pending hold instead — see the map.forEach block below.
+  const rawStockBySku = new Map(stockBySku);
+  const amazonHolds = getPendingAmazonHoldsBySku({ dueOnly: true });
   amazonHolds.forEach((heldQty, sku) => {
     if (stockBySku.has(sku)) stockBySku.set(sku, Math.max(0, stockBySku.get(sku) - heldQty));
   });
@@ -5569,13 +5678,23 @@ function getProductRollup() {
     }
   });
 
+  const allAmazonHolds = getPendingAmazonHoldsBySku();
+
   map.forEach(p => {
     if (!p.allSkus) p.allSkus = [p.sku];
     const sup = findSupplier(p.supplier);
     if (sup && sup.leadTime > 0) p.leadDays = +sup.leadTime;
     if (sup && sup.email && !p.email) p.email = sup.email;
 
-    p.totalStock = p.readyStock + p.inProductionQty;
+    // Reorder purposes ("is this SKU short overall") want every pending
+    // Amazon commitment netted out, not just the due ones — so a big
+    // future commitment still surfaces the need to reorder early even
+    // though it isn't due yet. p.readyStock (due-only) stays as the
+    // "available now" figure for daysImmediate/the critical alarm.
+    const rawStock = p.allSkus.reduce((s, k) => s + (rawStockBySku.get(k) || 0), 0);
+    const allHeld  = p.allSkus.reduce((s, k) => s + (allAmazonHolds.get(k) || 0), 0);
+    const stockNetAmazon = Math.max(0, rawStock - allHeld);
+    p.totalStock = stockNetAmazon + p.inProductionQty;
     // Days of cover & status now use the currently selected ADS window (adsN)
     p.daysImmediate = p.adsN > 0 ? p.readyStock / p.adsN : Infinity;
     p.daysTotal     = p.adsN > 0 ? p.totalStock / p.adsN : Infinity;
@@ -7074,6 +7193,7 @@ function render() {
   updateNavCounts();
   const main = document.getElementById('main');
   if (currentView === 'dashboard')                main.innerHTML = renderDashboard();
+  else if (currentView === 'amazonImpact')        main.innerHTML = renderAmazonShopifyImpact();
   else if (currentView === 'sales')               main.innerHTML = renderSales();
   else if (currentView === 'salesAmazon')         main.innerHTML = renderSalesAmazon();
   else if (currentView === 'inProduction')        main.innerHTML = renderInProduction();
@@ -7109,6 +7229,18 @@ function render() {
   document.querySelectorAll('.wh-bulk-checkbox-group[data-indeterminate="1"]').forEach(cb => {
     cb.indeterminate = true;
   });
+  // A redirect from Dashboard/Warehouse/ADS asked to land on a specific
+  // SKU's card here with its timeline graph already open — do that once
+  // the tab's own HTML is in the DOM, then clear the request.
+  if (currentView === 'amazonImpact' && pendingHealthCheckFocusSku) {
+    const sku = pendingHealthCheckFocusSku;
+    pendingHealthCheckFocusSku = null;
+    const card = document.getElementById('amz-impact-card-' + skuDomId(sku));
+    if (card) {
+      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      toggleAmazonImpactTimeline(sku, true);
+    }
+  }
 }
 
 function updateNavCounts() {
@@ -7267,13 +7399,17 @@ function getCombinedWarehouseReorder() {
   dayo.customized.forEach(i => ingest(i, 'dayoneQty'));
   dayo.whitelabel.forEach(i => ingest(i, 'dayoneQty'));
 
-  // Units earmarked for Amazon but still physically at DayOne shouldn't
-  // count as available DayOne stock for reorder purposes.
-  const amazonHolds = getPendingAmazonHoldsBySku();
-  amazonHolds.forEach((heldQty, sku) => {
-    const e = skuMap.get(sku);
-    if (e) e.dayoneQty = Math.max(0, e.dayoneQty - heldQty);
-  });
+  // Two separate readings of Amazon commitments, kept apart deliberately:
+  //  - dueHolds:  only commitments actually due (within the pack/pick
+  //    buffer of their ship date) — nets against the IMMEDIATE stock figure
+  //    used for the "critical" / "out" alarm, so a shipment scheduled weeks
+  //    out doesn't falsely read as a shortage today.
+  //  - allHolds:  every pending commitment regardless of date — nets
+  //    against stock + incoming production for the forward-looking
+  //    reorder trigger, so a big future Amazon commitment still surfaces
+  //    the need to reorder early even though it isn't due yet.
+  const dueHolds = getPendingAmazonHoldsBySku({ dueOnly: true });
+  const allHolds = getPendingAmazonHoldsBySku();
 
   // Merge with sales/production data
   const baseRollup = getProductRollup();
@@ -7281,8 +7417,12 @@ function getCombinedWarehouseReorder() {
 
   return Array.from(skuMap.values()).map(e => {
     const base = bySku.get(e.sku) || { adsN: 0, adsDays: state.salesViewDays || 3, ads7: 0, ads14: 0, inProductionQty: 0, leadDays: DEFAULT_LEAD_DAYS, soonestPromise: null };
-    const stock = e.bsQty + e.dayoneQty;
-    const totalStock = stock + base.inProductionQty;
+    const rawDayoneQty = e.dayoneQty;
+    const dayoneQtyNow  = Math.max(0, rawDayoneQty - (dueHolds.get(e.sku) || 0));
+    const dayoneQtyPlan = Math.max(0, rawDayoneQty - (allHolds.get(e.sku) || 0));
+    const stock = e.bsQty + dayoneQtyNow;             // physically available today
+    const stockPlan = e.bsQty + dayoneQtyPlan;        // net of every Amazon commitment, for forward planning
+    const totalStock = stockPlan + base.inProductionQty;
     const daysImmediate = base.adsN > 0 ? stock / base.adsN : Infinity;
     const daysTotal     = base.adsN > 0 ? totalStock / base.adsN : Infinity;
     const daysToArrival = base.soonestPromise ? Math.max(0, (base.soonestPromise - Date.now()) / 86400000) : null;
@@ -7307,7 +7447,7 @@ function getCombinedWarehouseReorder() {
     return {
       sku: e.sku, name: e.name, photo: e.photo,
       bsQty: e.bsQty, dayoneQty: e.dayoneQty,
-      stock, adsN: base.adsN, adsDays: base.adsDays,
+      stock, stockPlan, adsN: base.adsN, adsDays: base.adsDays,
       ads7: base.ads7, ads14: base.ads14,
       inProductionQty: base.inProductionQty,
       soonestPromise: base.soonestPromise,
@@ -7338,7 +7478,7 @@ function getCombinedWarehouseReorderAmazon() {
   return combined.map(p => {
     const adsAmazon = p.adsN * (1 + AMAZON_PROJECTION_RATE);
     const daysImmediate = adsAmazon > 0 ? p.stock / adsAmazon : Infinity;
-    const daysTotal     = adsAmazon > 0 ? (p.stock + p.inProductionQty) / adsAmazon : Infinity;
+    const daysTotal     = adsAmazon > 0 ? ((p.stockPlan != null ? p.stockPlan : p.stock) + p.inProductionQty) / adsAmazon : Infinity;
     const reliefDays = p.daysToArrival !== null ? p.daysToArrival : (p.leadDays || DEFAULT_LEAD_DAYS);
 
     let status;
@@ -7352,6 +7492,570 @@ function getCombinedWarehouseReorderAmazon() {
     return { ...p, adsNormal: p.adsN, adsN: adsAmazon, daysImmediate, daysTotal, status };
   });
 }
+
+/* ---------- Shopify Inventory Health Check After Amazon Shipment ----------
+   Simulates stock-on-hand over time for a single SKU by walking forward
+   from today's combined (BS + DayOne) stock, applying every future event
+   in date order:
+     - incoming production deliveries (from batches, same grouping used by
+       computeDeliveryTimeline) — add to stock on arrival
+     - every pending (not yet shipped) Amazon commitment for this SKU —
+       subtract on its ship date (or "today" if no date is on file, same
+       fallback used everywhere else)
+   with ordinary sales depleting stock at the SKU's ADS in between. Stock is
+   floored at 0 between events — lost sales, not a negative balance — and an
+   Amazon shipment landing when there isn't enough stock to cover it is
+   flagged as a shortfall rather than silently going negative. This is what
+   answers "will Shopify still have enough after we ship X to Amazon on
+   date Y" and drives the health-check tab's rows and its timeline chart.
+
+   runStockSimulation() is the pure math (no data lookups); it's used only
+   via simulateAmazonImpactTimeline(), the sku-in-object-out convenience
+   wrapper the health-check tab calls.
+*/
+function runStockSimulation({ startStock, ads, batches, holds }) {
+  ads = +ads || 0;
+  startStock = Math.max(0, +startStock || 0);
+
+  const prodGroups = new Map();
+  (batches || []).forEach(b => {
+    const date = getBatchArrival(b && b.po, b && b.li);
+    if (!date) return;
+    const li = b && b.li;
+    const qty = Math.max(0, (+(li && li.quantity) || 0) - (+(li && li.unitsCompleted) || 0));
+    if (qty <= 0) return;
+    const key = toDateInputValue(date);
+    if (!prodGroups.has(key)) prodGroups.set(key, { date, qty: 0, type: 'production' });
+    prodGroups.get(key).qty += qty;
+  });
+
+  const amzGroups = new Map();
+  (holds || []).forEach(h => {
+    const qty = +h.quantity || 0;
+    if (qty <= 0) return;
+    const date = h.shipDate ? parseDate(h.shipDate) : new Date();
+    if (!date) return;
+    const key = toDateInputValue(date);
+    if (!amzGroups.has(key)) amzGroups.set(key, { date, qty: 0, type: 'amazon' });
+    amzGroups.get(key).qty += qty;
+  });
+
+  const events = [...prodGroups.values(), ...amzGroups.values()].sort((a, b) => a.date - b.date);
+
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  let cursorDate = today;
+  let stock = startStock;
+  const points = [{ date: today, stock, label: 'Current inventory', type: 'start' }];
+  const oosPeriods = [];
+  const amazonImpacts = [];
+  const soldSegments = []; // {from, to, days, qty, ads} — units sold between two points, for the "▼ X sold (Nd × ads)" annotation
+
+  events.forEach(ev => {
+    const daysElapsed = Math.max(0, (ev.date - cursorDate) / 86400000);
+    const stockEnteringSegment = stock;
+    let stockBeforeEvent;
+    if (ads > 0 && daysElapsed > 0) {
+      const daysToZero = stock / ads;
+      if (daysToZero < daysElapsed) {
+        const oosStart = new Date(cursorDate.getTime() + Math.max(0, daysToZero) * 86400000);
+        oosPeriods.push({ start: oosStart, end: ev.date, days: Math.max(1, Math.round((ev.date - oosStart) / 86400000)), endEventType: ev.type, endEventQty: ev.qty });
+        points.push({ date: oosStart, stock: 0, label: 'Sold out', type: 'oos' });
+        stockBeforeEvent = 0;
+        if (daysToZero > 0.1) soldSegments.push({ from: cursorDate, to: oosStart, days: daysToZero, qty: stock, ads });
+      } else {
+        stockBeforeEvent = stock - ads * daysElapsed;
+        soldSegments.push({ from: cursorDate, to: ev.date, days: daysElapsed, qty: ads * daysElapsed, ads });
+      }
+    } else {
+      stockBeforeEvent = stock;
+    }
+
+    let shortfall = 0, stockAfter;
+    if (ev.type === 'production') {
+      stockAfter = stockBeforeEvent + ev.qty;
+    } else {
+      if (ev.qty > stockBeforeEvent) shortfall = ev.qty - stockBeforeEvent;
+      stockAfter = Math.max(0, stockBeforeEvent - ev.qty);
+    }
+
+    const label = ev.type === 'production'
+      ? `+${fmtNum(ev.qty)} pcs (delivery)`
+      : `−${fmtNum(ev.qty)} pcs (ship to Amazon)`;
+    points.push({ date: ev.date, stock: stockBeforeEvent, label, type: ev.type + '-before' });
+    points.push({ date: ev.date, stock: stockAfter, label: '', type: ev.type + '-after' });
+
+    if (ev.type === 'amazon') {
+      amazonImpacts.push({
+        date: ev.date, qty: ev.qty, stockAfter,
+        daysOfCoverAfter: ads > 0 ? stockAfter / ads : Infinity,
+        shortfall,
+        // Breakdown, kept so the UI can show its work on request:
+        stockEnteringSegment, daysElapsed, sold: Math.max(0, stockEnteringSegment - stockBeforeEvent),
+        stockBeforeShipment: stockBeforeEvent, ads
+      });
+    }
+
+    cursorDate = ev.date;
+    stock = stockAfter;
+  });
+
+  // Once every currently known event (production + Amazon shipments) is
+  // done, stock just declines at ADS with nothing left scheduled to top it
+  // back up — so that point is where "how much runway is left" becomes a
+  // single clean number. The reorder date is simply: walk forward from
+  // there until remaining cover drops to the trigger threshold. If it's
+  // already at or below the threshold right after the last event, the
+  // reorder date falls before that event (possibly before today) —
+  // reorderOverdue flags that case.
+  const lastEventDate = cursorDate;
+  const stockAfterLastEvent = stock;
+  const triggerDays = getReorderTriggerDays();
+  let reorderDate = null;
+  if (ads > 0) {
+    const runwayAfterLastEvent = stockAfterLastEvent / ads;
+    const daysUntilMustReorder = runwayAfterLastEvent - triggerDays;
+    reorderDate = new Date(lastEventDate.getTime() + daysUntilMustReorder * 86400000);
+  }
+  const reorderOverdue = reorderDate != null && reorderDate.getTime() <= today.getTime();
+
+  // Project forward from the last known event. Rather than a fixed window,
+  // extend the chart until it actually reaches the point where stock hits
+  // zero (with a little breathing room after, so the flat zero line reads
+  // clearly) — that's the "does this end somewhere real" fix. If there's
+  // no known runout within a year (very low ADS, or ads === 0), cap the
+  // window instead of drawing a near-endless line, and say so explicitly
+  // rather than just stopping mid-slope.
+  const MAX_HORIZON_DAYS = 365;
+  const MIN_HORIZON_DAYS = 30;
+  const daysToZero = ads > 0 ? stock / ads : Infinity;
+  const runsOutWithinCap = ads > 0 && daysToZero <= MAX_HORIZON_DAYS;
+  let horizonDate, endsAtRunout = false, continuesBeyondHorizon = false;
+
+  if (runsOutWithinCap) {
+    // The chart just ends here — "Sold out" is the terminal point, not the
+    // start of a shaded "period" running off to some arbitrary horizon.
+    // There's nothing known beyond this date to draw or shade.
+    const zeroDate = new Date(cursorDate.getTime() + daysToZero * 86400000);
+    horizonDate = zeroDate;
+    if (daysToZero > 0.1) soldSegments.push({ from: cursorDate, to: zeroDate, days: daysToZero, qty: stock, ads });
+    points.push({ date: zeroDate, stock: 0, label: 'Sold out', type: 'oos' });
+    endsAtRunout = true;
+  } else {
+    horizonDate = new Date(Math.max(
+      today.getTime() + MAX_HORIZON_DAYS * 86400000,
+      cursorDate.getTime() + MIN_HORIZON_DAYS * 86400000
+    ));
+    if (ads > 0) {
+      const daysToHorizon = (horizonDate - cursorDate) / 86400000;
+      if (daysToHorizon > 0.1) soldSegments.push({ from: cursorDate, to: horizonDate, days: daysToHorizon, qty: ads * daysToHorizon, ads });
+      points.push({ date: horizonDate, stock: Math.max(0, stock - ads * daysToHorizon), label: '', type: 'end' });
+    } else {
+      points.push({ date: horizonDate, stock, label: '', type: 'end' });
+    }
+    continuesBeyondHorizon = true;
+  }
+
+  return { ads, startStock, points, oosPeriods, amazonImpacts, soldSegments, horizonDate, lastEventDate, stockAfterLastEvent, triggerDays, reorderDate, reorderOverdue, endsAtRunout, continuesBeyondHorizon };
+}
+
+// Convenience wrapper for the health-check tab: looks up a SKU's own stock/
+// ADS/batches/holds and runs the simulation.
+function simulateAmazonImpactTimeline(sku) {
+  const rollup = getCombinedWarehouseReorder();
+  const row = rollup.find(p => p.sku === sku);
+  if (!row) return null;
+  const holds = (state.toShipAmazon || []).filter(h => !h.shipped && h.sku === sku);
+  const startStock = Math.max(0, (+row.bsQty || 0) + (+row.dayoneQty || 0));
+  const sim = runStockSimulation({ startStock, ads: row.adsN, batches: row.batches, holds });
+  return { sku, name: row.name, ...sim };
+}
+
+// Every SKU with at least one pending (not yet shipped) Amazon commitment —
+// these are the ones that move to the Shopify Health Check tab and drop
+// out of the plain Dashboard/Warehouse/ADS Days-of-Cover columns, since
+// only the sequenced simulation tells their story accurately.
+function getAmazonScheduledSkuSet() {
+  const set = new Set();
+  (state.toShipAmazon || []).forEach(h => { if (!h.shipped && h.sku) set.add(h.sku); });
+  return set;
+}
+
+// Sorts a SKU with a pending Amazon shipment into one of three buckets for
+// the Health Check tab's grouped layout:
+//   - 'reorder-now': already overdue on the reorder trigger, or a Amazon
+//     shipment shortfall that ISN'T explained by an already-scheduled
+//     delivery arriving a bit late (see 'expedite' below) — i.e. there's
+//     genuinely nothing in the pipeline to rescue it, so a fresh order is
+//     the only fix.
+//   - 'expedite': stock runs dry for a stretch before a delivery that's
+//     already scheduled and on the books — the fix is speeding that
+//     delivery up, not placing a new order. Checked BEFORE the shortfall
+//     case: a shortfall that happens because stock hit zero right before
+//     an already-scheduled delivery (the delivery's just running a bit
+//     late) is really the same problem — expediting that delivery closes
+//     the gap and clears the shortfall too, so it wins over 'reorder-now'
+//     when both would otherwise apply. Carries the qty/date of the
+//     delivery to expedite and the date it's needed by (when the gap
+//     starts) to actually close the gap.
+//   - 'healthy': no shortfall, no interim gap, not overdue.
+function classifyAmazonHealthSku(sim) {
+  if (sim.reorderOverdue) {
+    return { tier: 'reorder-now' };
+  }
+  const gap = sim.oosPeriods.find(o => o.start < sim.lastEventDate && o.endEventType === 'production');
+  if (gap) {
+    return { tier: 'expedite', neededBy: gap.start, qty: gap.endEventQty, arrivesOn: gap.end, gapDays: gap.days };
+  }
+  if (sim.amazonImpacts.some(i => i.shortfall > 0)) {
+    return { tier: 'reorder-now' };
+  }
+  return { tier: 'healthy' };
+}
+
+// Renders the simulated timeline as an inline SVG step-chart — deliveries
+// as upward jumps, Amazon shipments as downward jumps, sales as the
+// declining slope between them, sold-out stretches shaded and labeled with
+// how many days they last, and each declining segment annotated with how
+// much sold and over how many days (qty = days × ADS).
+function renderAmazonImpactSVG(sim) {
+  const W = 900, H = 370, padL = 56, padR = 24, padT = 46, padB = 40;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const t0 = sim.points[0].date.getTime();
+  const t1 = sim.horizonDate.getTime();
+  const span = Math.max(1, t1 - t0);
+  const maxStock = Math.max(1, ...sim.points.map(p => p.stock));
+  const x = d => padL + ((d.getTime() - t0) / span) * plotW;
+  const y = v => padT + plotH - (Math.max(0, v) / maxStock) * plotH;
+  const pxPerDay = plotW / (span / 86400000);
+
+  let path = '';
+  sim.points.forEach((p, i) => { path += (i === 0 ? 'M' : 'L') + x(p.date).toFixed(1) + ' ' + y(p.stock).toFixed(1) + ' '; });
+
+  // OOS band labels sit in the top margin (above the plot, not inside the
+  // band) so they never compete with the event labels drawn near the
+  // bottom of a stockout dip — and are skipped entirely when the band is
+  // too narrow to fit text without it running into a neighboring label.
+  const bands = sim.oosPeriods.map(o => {
+    const bx = x(o.start), bx2 = x(o.end);
+    const cx = (bx + bx2) / 2;
+    const wide = (bx2 - bx) > 26;
+    return `<rect x="${bx.toFixed(1)}" y="${padT}" width="${Math.max(0, bx2 - bx).toFixed(1)}" height="${plotH}" fill="var(--status-critical-bg)" opacity="0.7"/>
+      ${wide ? `<text x="${cx.toFixed(1)}" y="30" font-size="10" font-weight="700" text-anchor="middle" fill="var(--status-critical)">OOS — ${o.days} day${o.days === 1 ? '' : 's'}</text>` : ''}`;
+  }).join('');
+
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map(f => {
+    const val = Math.round(maxStock * f);
+    const gy = y(val);
+    return `<line x1="${padL}" y1="${gy.toFixed(1)}" x2="${padL + plotW}" y2="${gy.toFixed(1)}" stroke="var(--line-soft)" stroke-width="1"/>
+      <text x="${(padL - 8).toFixed(1)}" y="${(gy + 3).toFixed(1)}" font-size="10" text-anchor="end" fill="var(--ink-mute)">${fmtNum(val)}</text>`;
+  }).join('');
+
+  const tickDatesSorted = Array.from(new Set(sim.points.map(p => toDateInputValue(p.date))))
+    .map(d => parseDate(d)).sort((a, b) => a - b);
+  let ticks = '', lastTickX = -Infinity;
+  tickDatesSorted.forEach(d => {
+    const tx = x(d);
+    if (tx - lastTickX < 42) return; // too close to the previous tick — skip rather than overlap
+    lastTickX = tx;
+    ticks += `<line x1="${tx.toFixed(1)}" y1="${padT}" x2="${tx.toFixed(1)}" y2="${padT + plotH}" stroke="var(--line)" stroke-width="1"/>
+      <text x="${tx.toFixed(1)}" y="${H - 20}" font-size="10" text-anchor="middle" fill="var(--ink-mute)">${d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</text>`;
+  });
+
+  // Simple collision avoidance: within a band of same-purpose labels, a
+  // label whose x is close to the previous one gets pushed further out
+  // (an extra "stack level") instead of sitting on top of it.
+  const stackLevels = (xs, minGapPx) => {
+    const order = xs.map((v, i) => ({ x: v, i })).sort((a, b) => a.x - b.x);
+    const levels = new Array(xs.length).fill(0);
+    for (let k = 1; k < order.length; k++) {
+      if (order[k].x - order[k - 1].x < minGapPx) {
+        levels[order[k].i] = levels[order[k - 1].i] + 1;
+      }
+    }
+    return levels;
+  };
+
+  // Event labels ("+X pcs (delivery)" / "−X pcs (ship to Amazon)" / "Sold
+  // out") sit above the point, offset sideways rather than centered on it —
+  // centering would print the text right over the vertical jump line at
+  // that same x. Near the right edge the offset flips so the text doesn't
+  // run off the chart. Tightly clustered events (small quantities close in
+  // time) stack progressively higher rather than overlapping.
+  const eventPoints = sim.points.filter(p => p.label);
+  const eventLevels = stackLevels(eventPoints.map(p => x(p.date)), 130);
+  const markers = eventPoints.map((p, i) => {
+    const cx = x(p.date), cy = y(p.stock);
+    const color = p.type === 'amazon-before' ? 'var(--status-critical)'
+      : p.type === 'production-before' ? 'var(--status-healthy)'
+      : p.type === 'oos' ? 'var(--status-critical)'
+      : 'var(--ink-soft)';
+    const dy = (p.type === 'oos' ? -16 : -10) - eventLevels[i] * 18;
+    const nearRightEdge = cx > (W - padR - 150);
+    const anchor = nearRightEdge ? 'end' : 'start';
+    const tx = nearRightEdge ? cx - 8 : cx + 8;
+    return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" fill="${color}"/>
+      <text x="${tx.toFixed(1)}" y="${(cy + dy).toFixed(1)}" font-size="10" font-weight="600" text-anchor="${anchor}" fill="${color}">${escapeHtml(p.label)}</text>`;
+  }).join('');
+
+  // "▼ X sold (Nd × ads/day)" — placed below the declining segment's
+  // midpoint, stacked lower when two segments land close together. Skipped
+  // entirely for a segment too narrow on screen to fit the text without
+  // it running into its neighbors.
+  const soldMidX = sim.soldSegments.map(s => x(new Date((s.from.getTime() + s.to.getTime()) / 2)));
+  const soldLevels = stackLevels(soldMidX, 140);
+  const soldLabels = sim.soldSegments.filter(s => (s.days * pxPerDay) > 18).map((s) => {
+    const i = sim.soldSegments.indexOf(s);
+    const midDate = new Date((s.from.getTime() + s.to.getTime()) / 2);
+    // Find the segment's start/end stock from the matching points for accurate y placement.
+    const startPt = sim.points.find(p => p.date.getTime() === s.from.getTime());
+    const endPt = [...sim.points].reverse().find(p => p.date.getTime() === s.to.getTime());
+    const yStart = startPt ? startPt.stock : s.qty;
+    const yEnd = endPt ? endPt.stock : Math.max(0, yStart - s.qty);
+    const midY = y((yStart + yEnd) / 2);
+    const cx = x(midDate);
+    const cy = midY + 22 + soldLevels[i] * 28;
+    const daysLabel = s.days >= 1 ? Math.round(s.days) : Math.round(s.days * 10) / 10;
+    return `<text x="${cx.toFixed(1)}" y="${cy.toFixed(1)}" font-size="10.5" font-style="italic" text-anchor="middle" fill="var(--ink-mute)">▼ ${fmtNum(Math.round(s.qty))} sold</text>
+      <text x="${cx.toFixed(1)}" y="${(cy + 12).toFixed(1)}" font-size="10.5" font-style="italic" text-anchor="middle" fill="var(--ink-mute)">(${daysLabel}d × ${fmtNum(Math.round(s.ads))})</text>`;
+  }).join('');
+
+  // When the chart doesn't reach an actual runout (very low ADS, or no
+  // sales at all), say so explicitly at the right edge instead of just
+  // stopping mid-slope, which otherwise looks like a cut-off/broken chart.
+  const continuesNote = sim.continuesBeyondHorizon
+    ? `<text x="${(W - padR).toFixed(1)}" y="${(padT + plotH + 34).toFixed(1)}" font-size="10" font-style="italic" text-anchor="end" fill="var(--ink-mute)">cover continues beyond ${sim.horizonDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} →</text>`
+    : '';
+
+  // Reorder-date marker — a vertical dashed line at the date the known
+  // pipeline crosses the reorder trigger, only drawn when it falls inside
+  // the visible window (an overdue date, before "today", would sit off
+  // the left edge and isn't useful to plot). Label sits at the very top of
+  // the margin, above where an OOS band's own label would go, so the two
+  // don't collide when they land at similar dates.
+  let reorderMarker = '';
+  if (sim.reorderDate && !sim.reorderOverdue && sim.reorderDate >= sim.points[0].date && sim.reorderDate <= sim.horizonDate) {
+    const rx = x(sim.reorderDate);
+    const label = `Reorder by ${sim.reorderDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}`;
+    reorderMarker = `<line x1="${rx.toFixed(1)}" y1="${padT}" x2="${rx.toFixed(1)}" y2="${padT + plotH}" stroke="var(--status-pipeline)" stroke-width="1.5" stroke-dasharray="4,3"/>
+      <text x="${rx.toFixed(1)}" y="14" font-size="10" font-weight="700" text-anchor="middle" fill="var(--status-pipeline)">${escapeHtml(label)}</text>`;
+  }
+
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:920px;display:block;">
+    ${bands}${yTicks}${ticks}
+    <path d="${path.trim()}" fill="none" stroke="var(--status-healthy)" stroke-width="2.5"/>
+    ${soldLabels}
+    ${markers}
+    ${reorderMarker}
+    ${continuesNote}
+  </svg>`;
+}
+
+function skuDomId(sku) { return String(sku || '').replace(/[^a-zA-Z0-9_-]/g, '_'); }
+
+function toggleImpactHow(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.style.display = (el.style.display === 'none' || !el.style.display) ? 'block' : 'none';
+}
+
+function toggleAmazonImpactTimeline(sku, forceOpen) {
+  const host = document.getElementById('amz-impact-chart-' + skuDomId(sku));
+  const btn = document.getElementById('amz-impact-btn-' + skuDomId(sku));
+  if (!host) return;
+  const isHidden = host.style.display === 'none' || !host.style.display;
+  if (isHidden || forceOpen) {
+    const sim = simulateAmazonImpactTimeline(sku);
+    host.innerHTML = sim ? renderAmazonImpactSVG(sim) : '<div class="wh-empty-section">No data available for this SKU.</div>';
+    host.style.display = 'block';
+    if (btn) btn.textContent = '📉 Hide delivery timeline graph';
+  } else {
+    host.style.display = 'none';
+    if (btn) btn.textContent = '📉 See delivery timeline graph';
+  }
+}
+
+function renderAmazonShopifyImpact() {
+  const pendingSkus = new Set((state.toShipAmazon || []).filter(x => !x.shipped && x.sku).map(x => x.sku));
+  const rows = Array.from(pendingSkus).map(sku => simulateAmazonImpactTimeline(sku)).filter(Boolean);
+
+  if (rows.length === 0) {
+    return emptyStateHTML('🛒', 'No pending Amazon shipments',
+      'Import an Amazon shipment plan (in "To Be Shipped Out to Amazon Warehouse") to see what Shopify-side Days of Cover looks like after each shipment goes out.',
+      []);
+  }
+
+  // Sort into three groups — see classifyAmazonHealthSku(): SKUs that need
+  // a fresh order placed right now, SKUs where the fix is expediting a
+  // delivery already on the books, and everything else.
+  rows.forEach(sim => { sim.health = classifyAmazonHealthSku(sim); });
+  const reorderNowRows = rows.filter(sim => sim.health.tier === 'reorder-now')
+    .sort((a, b) => {
+      const worst = sim => Math.min(...sim.amazonImpacts.map(i => i.shortfall > 0 ? -Infinity : i.daysOfCoverAfter));
+      return worst(a) - worst(b);
+    });
+  const expediteRows = rows.filter(sim => sim.health.tier === 'expedite')
+    .sort((a, b) => a.health.neededBy - b.health.neededBy);
+  const healthyRows = rows.filter(sim => sim.health.tier === 'healthy')
+    .sort((a, b) => {
+      const worst = sim => Math.min(...sim.amazonImpacts.map(i => i.daysOfCoverAfter));
+      return worst(a) - worst(b);
+    });
+
+  const rowHTML = (sim) => {
+    const id = skuDomId(sim.sku);
+    const impactRows = sim.amazonImpacts.map((imp, idx) => {
+      const status = imp.shortfall > 0 ? 'critical' : (imp.daysOfCoverAfter <= REORDER_DAYS ? 'reorder' : 'healthy');
+      const color = status === 'critical' ? 'var(--status-critical)' : status === 'reorder' ? 'var(--status-reorder)' : 'var(--status-healthy)';
+      const dateLabel = imp.date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+      const howId = `amz-impact-how-${id}-${idx}`;
+      const daysElapsedLabel = imp.daysElapsed >= 1 ? Math.round(imp.daysElapsed) : Math.round(imp.daysElapsed * 10) / 10;
+      const howText = imp.shortfall > 0
+        ? `${fmtNum(imp.stockEnteringSegment)} on hand · − ${fmtNum(Math.round(imp.sold))} sold over ${daysElapsedLabel}d (${imp.ads.toFixed(1)}/day ADS) = ${fmtNum(Math.round(imp.stockBeforeShipment))} on hand right before shipping · Amazon needs ${fmtNum(imp.qty)}, so it's ${fmtNum(Math.ceil(imp.shortfall))} short.`
+        : `${fmtNum(Math.round(imp.stockEnteringSegment))} on hand · − ${fmtNum(Math.round(imp.sold))} sold over ${daysElapsedLabel}d (${imp.ads.toFixed(1)}/day ADS) = ${fmtNum(Math.round(imp.stockBeforeShipment))} before shipping · − ${fmtNum(imp.qty)} shipped to Amazon = ${fmtNum(Math.round(imp.stockAfter))} left ÷ ${imp.ads.toFixed(1)} ADS = ${fmtDays(imp.daysOfCoverAfter)}.`;
+      return `<div style="padding:6px 0;border-bottom:1px solid var(--line-soft);font-size:12.5px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+          <span style="color:var(--ink-soft);">${dateLabel} · ship ${fmtNum(imp.qty)} pcs</span>
+          <span style="display:flex;align-items:center;gap:6px;">
+            <span style="color:${color};font-weight:600;">${imp.shortfall > 0 ? `⚠ short ${fmtNum(Math.ceil(imp.shortfall))} pcs at ship time` : `${fmtDays(imp.daysOfCoverAfter)} Days of Cover left`}</span>
+            <span onclick="toggleImpactHow('${howId}')" style="font-size:9.5px;color:var(--ink-mute);cursor:pointer;text-decoration:underline dotted;user-select:none;">how?</span>
+          </span>
+        </div>
+        <div id="${howId}" style="display:none;margin-top:5px;font-size:11px;color:var(--ink-mute);line-height:1.5;background:var(--lavender-faint);border-radius:4px;padding:6px 8px;">${howText}</div>
+      </div>`;
+    }).join('');
+
+    const triggerDays = sim.triggerDays != null ? sim.triggerDays : getReorderTriggerDays();
+    let reorderLine = '';
+    if (sim.ads > 0 && sim.reorderDate) {
+      const lastEventLabel = sim.lastEventDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+      const reorderDateLabel = sim.reorderDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+      const runwayAfterLastEvent = sim.stockAfterLastEvent / sim.ads;
+      const reorderColor = sim.reorderOverdue ? 'var(--status-critical)' : 'var(--status-pipeline)';
+      const reorderHowId = `amz-reorder-how-${id}`;
+      const reorderText = sim.reorderOverdue
+        ? `⚠ Reorder now — even after everything currently scheduled lands (${fmtNum(Math.round(sim.stockAfterLastEvent))} pcs left as of ${lastEventLabel}), that's only ${fmtDays(runwayAfterLastEvent)}, already under your ${triggerDays}-day trigger.`
+        : `📅 Reorder by ${reorderDateLabel} — after everything currently scheduled lands (${fmtNum(Math.round(sim.stockAfterLastEvent))} pcs left as of ${lastEventLabel}), that's ${fmtDays(runwayAfterLastEvent)} of cover; it crosses your ${triggerDays}-day trigger on that date.`;
+      reorderLine = `<div style="padding:8px 0 0;border-top:1px dashed var(--line);font-size:12.5px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+          <span style="color:${reorderColor};font-weight:600;">${sim.reorderOverdue ? '⚠ Reorder now' : `📅 Reorder by ${reorderDateLabel}`}</span>
+          <span onclick="toggleImpactHow('${reorderHowId}')" style="font-size:9.5px;color:var(--ink-mute);cursor:pointer;text-decoration:underline dotted;user-select:none;">how?</span>
+        </div>
+        <div id="${reorderHowId}" style="display:none;margin-top:5px;font-size:11px;color:var(--ink-mute);line-height:1.5;background:var(--lavender-faint);border-radius:4px;padding:6px 8px;">${reorderText}</div>
+      </div>`;
+    }
+
+    // Expedite tier gets a prominent header line naming the exact delivery
+    // to speed up and the date it needs to land by to close the gap.
+    let expediteHeader = '';
+    if (sim.health.tier === 'expedite') {
+      const neededByLabel = sim.health.neededBy.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+      const arrivesOnLabel = sim.health.arrivesOn.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+      expediteHeader = `<div style="background:var(--status-reorder-bg);color:#8A6D16;border-radius:6px;padding:8px 10px;font-size:12.5px;font-weight:600;">
+        ⏱ Needs ${fmtNum(sim.health.qty)} pcs expedited completion on ${neededByLabel} to close a ${sim.health.gapDays}-day stockout gap (currently scheduled to arrive ${arrivesOnLabel})
+      </div>`;
+    }
+
+    return `
+      <div id="amz-impact-card-${id}" class="wh-card" style="flex-direction:column;align-items:stretch;gap:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+          <div>
+            <div class="wh-card-sku">${escapeHtml(sim.sku)}</div>
+            <div class="wh-card-name">${escapeHtml(sim.name)}</div>
+          </div>
+          <div style="text-align:right;font-size:11.5px;color:var(--ink-mute);">
+            Current stock: <strong style="color:var(--ink);">${fmtNum(sim.startStock)}</strong> · ADS: ${sim.ads.toFixed(1)}/day
+          </div>
+        </div>
+        ${expediteHeader}
+        <div>${impactRows}</div>
+        ${reorderLine}
+        <div>
+          <button id="amz-impact-btn-${id}" class="btn btn-ghost" style="font-size:11px;" onclick="toggleAmazonImpactTimeline('${escapeAttr(sim.sku)}')">📉 See delivery timeline graph</button>
+          <div id="amz-impact-chart-${id}" style="display:none;margin-top:12px;padding:14px 6px 4px;border:1px solid var(--line);border-radius:var(--radius);"></div>
+        </div>
+      </div>`;
+  };
+
+  const triggerDays = getReorderTriggerDays();
+
+  const sectionHTML = (title, icon, list) => list.length === 0 ? '' : `
+    <div class="section-header" style="margin-top:28px;">
+      <h2 class="section-title">${icon} ${title} <span style="color:var(--ink-mute);font-weight:500;">(${list.length})</span></h2>
+    </div>
+    <div class="wh-list">${list.map(rowHTML).join('')}</div>`;
+
+  return `
+    <div class="action-bar">
+      <span class="last-updated">${getLastUpdated()}</span>
+    </div>
+    <div class="page-header">
+      <h1 class="page-title">🛒 Shopify Inventory Health Check After Amazon Shipment</h1>
+      <p class="page-subtitle">For every SKU with a pending Amazon shipment, this simulates stock forward day by day — sales depleting it, production topping it up, each Amazon shipment pulling from it on its own ship date — and shows the Days of Cover left for Shopify right after each shipment goes out, so reorders can be planned around what Amazon actually takes, not just today's stock.</p>
+    </div>
+    ${buildHealthCheckNotificationHTML(reorderNowRows, expediteRows)}
+    <div class="action-bar" style="flex-wrap:wrap;">
+      <label style="font-size:12px;color:var(--ink-soft);display:inline-flex;align-items:center;gap:6px;">
+        Reorder trigger:
+        <input type="number" min="0" value="${triggerDays}" onchange="updateReorderTriggerDays(this.value)"
+               style="width:56px;font-family:inherit;font-size:12px;border:1px solid var(--line);border-radius:4px;padding:4px 6px;">
+        day${triggerDays === 1 ? '' : 's'} of cover once the known pipeline runs out
+      </label>
+    </div>
+    ${sectionHTML('Needs Reorder Now', '🔴', reorderNowRows)}
+    ${sectionHTML('Needs Production Expedited', '⏱', expediteRows)}
+    ${sectionHTML('Healthy', '🟢', healthyRows)}`;
+}
+
+// Dropdown notification banner for this tab — same component/classes as
+// the Warehouse reorder banner, so it looks and behaves identically, just
+// summarizing the two groups that need attention here.
+function buildHealthCheckNotificationHTML(reorderNowRows, expediteRows) {
+  const hasAttention = reorderNowRows.length > 0 || expediteRows.length > 0;
+  const totalCount = reorderNowRows.length + expediteRows.length;
+  return `
+    <details class="wh-reorder-banner ${hasAttention ? 'has-attention' : 'all-clear'}">
+      <summary class="wh-reorder-banner-summary">
+        <span class="wh-reorder-banner-icon">${hasAttention ? '🔁' : '✓'}</span>
+        <span class="wh-reorder-banner-count">${totalCount}</span>
+        <span class="wh-reorder-banner-label">
+          ${hasAttention ? (totalCount === 1 ? 'product needs attention' : 'products need attention') : 'all clear'}
+        </span>
+        <span class="wh-reorder-banner-meta">${reorderNowRows.length} need reorder now${expediteRows.length ? ` · ${expediteRows.length} need expediting` : ''}</span>
+        <span class="wh-reorder-banner-chevron">
+          <span class="chev-text-closed">Click to view</span>
+          <span class="chev-text-open">Hide</span>
+          <span class="chev-arrow">▾</span>
+        </span>
+      </summary>
+      <div class="wh-reorder-banner-body">
+        ${reorderNowRows.length > 0 ? `
+          <div class="wh-reorder-expedite-heading">🔴 Needs reorder now</div>
+          ${reorderNowRows.map(sim => `
+            <div class="wh-reorder-row">
+              <div class="wh-reorder-row-info" style="flex:1;">
+                <div class="wh-reorder-row-sku">${escapeHtml(sim.sku)}</div>
+                <div class="wh-reorder-row-name">${escapeHtml(sim.name)}</div>
+              </div>
+              <button class="btn btn-ghost" style="font-size:11px;" onclick="goToHealthCheckSku('${escapeAttr(sim.sku)}')">See →</button>
+            </div>`).join('')}
+        ` : ''}
+        ${expediteRows.length > 0 ? `
+          <div class="wh-reorder-expedite-heading">⏱ Needs expediting</div>
+          ${expediteRows.map(sim => `
+            <div class="wh-reorder-row">
+              <div class="wh-reorder-row-info" style="flex:1;">
+                <div class="wh-reorder-row-sku">${escapeHtml(sim.sku)}</div>
+                <div class="wh-reorder-row-name">${escapeHtml(sim.name)} — needs ${fmtNum(sim.health.qty)} pcs expedited by ${sim.health.neededBy.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</div>
+              </div>
+              <button class="btn btn-ghost" style="font-size:11px;" onclick="goToHealthCheckSku('${escapeAttr(sim.sku)}')">See →</button>
+            </div>`).join('')}
+        ` : ''}
+        ${!hasAttention ? `<div class="wh-reorder-empty">No Amazon-scheduled SKU needs reorder or expediting right now.</div>` : ''}
+      </div>
+    </details>`;
+}
+
+
 
 function renderWarehouseInventory(warehouse) {
   const meta = WH_META[warehouse];
@@ -7498,16 +8202,24 @@ function renderPhasedOutWarehouse() {
    Bridges the gap between "committed to an Amazon shipment" and "actually
    left DayOne's warehouse". DayOne's own daily fulfillment sync doesn't drop
    a SKU's quantity until the units physically depart, so importing a
-   shipment plan here immediately (and continuously, render over render)
-   deducts those quantities from DayOne's *effective* stock everywhere it
-   matters — the Warehouse card itself, Average Daily Sales (both tabs),
-   Analytics Dashboard, and the reorder calc — without touching the raw
-   DayOne data DayOne's sync writes to. Once "Shipped Out Already" is
-   clicked, the deduction stops, since DayOne's own next sync should already
+   shipment plan here deducts those quantities from DayOne's *effective*
+   stock everywhere it matters — the Warehouse card, Average Daily Sales
+   (both tabs), Analytics Dashboard, and the reorder calc — without touching
+   the raw DayOne data DayOne's sync writes to.
+
+   That deduction is date-aware, not immediate: a shipment only counts
+   against *today's* available stock once it's within the buffer window of
+   its ship date (see isAmazonHoldDue) — so a batch scheduled weeks out,
+   still under production, doesn't read as a false shortage. It always
+   counts against the *forward* reorder check (stock + incoming production
+   vs. every pending commitment), so a big future commitment still surfaces
+   the need to reorder early. Once "Shipped Out Already" is clicked, the
+   deduction stops entirely, since DayOne's own next sync should already
    reflect the real reduction from that point on. */
 function renderToShipAmazon() {
   const items = state.toShipAmazon || [];
   const pending = items.filter(x => !x.shipped);
+  const bufferDays = getAmazonBufferDays();
 
   const rawDayoneQty = (sku) => {
     const wh = ensureWHWarehouse('dayone');
@@ -7520,10 +8232,26 @@ function renderToShipAmazon() {
 
   const rowHTML = (item) => {
     const raw = rawDayoneQty(item.sku);
-    const effective = Math.max(0, raw - (+item.quantity || 0));
+    const due = isAmazonHoldDue(item);
+    // Only a due shipment actually deducts from what's shown as "available
+    // now" — a not-yet-due one shows its raw stock untouched, plus a note,
+    // so it never reads as a shortage before it needs to.
+    const effective = due ? Math.max(0, raw - (+item.quantity || 0)) : raw;
     const photo = item.photo
       ? `<img src="${escapeAttr(item.photo)}" alt="" style="width:44px;height:44px;object-fit:cover;border-radius:6px;flex-shrink:0;">`
       : `<div style="width:44px;height:44px;border-radius:6px;background:var(--lavender-faint);flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--ink-mute);font-size:11px;">·</div>`;
+
+    let dateNote;
+    if (item.shipDate) {
+      const daysOut = Math.round((parseDate(item.shipDate).getTime() - Date.now()) / 86400000);
+      const whenLabel = daysOut > 0 ? `in ${daysOut} day${daysOut === 1 ? '' : 's'}` : (daysOut === 0 ? 'today' : `${Math.abs(daysOut)} day${Math.abs(daysOut) === 1 ? '' : 's'} overdue`);
+      dateNote = due
+        ? `<span style="color:var(--status-pipeline);">🛫 due ${whenLabel} · deducting now</span>`
+        : `<span style="color:var(--ink-mute);">📦 ships ${whenLabel} · not due yet, not deducted</span>`;
+    } else {
+      dateNote = `<span style="color:var(--ink-mute);">No ship date on file · counted as due now</span>`;
+    }
+
     return `
       <div class="wh-card" style="align-items:center;">
         ${photo}
@@ -7532,6 +8260,15 @@ function renderToShipAmazon() {
           <div class="wh-card-name">${escapeHtml(item.name || '(Unnamed item)')}</div>
           <div style="font-size:11px;color:var(--ink-mute);margin-top:2px;">
             ${fmtNum(+item.quantity || 0)} units earmarked for Amazon · DayOne raw: ${fmtNum(raw)} → effective: ${fmtNum(effective)}
+          </div>
+          <div style="font-size:11px;margin-top:4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            ${dateNote}
+            <label style="color:var(--ink-mute);display:inline-flex;align-items:center;gap:4px;">
+              Ship date:
+              <input type="date" value="${escapeAttr(toDateInputValue(item.shipDate) || '')}"
+                     onchange="updateToShipAmazonDate('${escapeAttr(item.id)}', this.value)"
+                     style="font-family:inherit;font-size:11px;border:1px solid var(--line);border-radius:4px;padding:2px 4px;">
+            </label>
           </div>
         </div>
         <div class="wh-card-actions">
@@ -7542,7 +8279,7 @@ function renderToShipAmazon() {
   };
 
   const emptyBody = pending.length === 0
-    ? `<div class="wh-empty-section">No pending Amazon shipments yet · import a shipment plan above to start deducting it from DayOne's effective stock.</div>`
+    ? `<div class="wh-empty-section">No pending Amazon shipments yet · import a shipment plan above to start tracking it.</div>`
     : '';
 
   return `
@@ -7551,11 +8288,17 @@ function renderToShipAmazon() {
     </div>
     <div class="page-header">
       <h1 class="page-title">🚀 To Be Shipped Out to Amazon Warehouse</h1>
-      <p class="page-subtitle">Units committed to an Amazon shipment but still physically at DayOne · deducted from DayOne's effective stock (Warehouse, ADS, Dashboard, Reorder) until confirmed shipped. Once shipped, items move to the "Shipped Out to Amazon" tab.</p>
+      <p class="page-subtitle">Units committed to an Amazon shipment but still physically at DayOne. Once a shipment is within the buffer window of its ship date, it deducts from DayOne's effective stock (Warehouse, ADS, Dashboard) so "available now" stays accurate; every pending shipment — due or not — is always netted against Stock + Production for the reorder trigger. Once shipped, items move to the "Shipped Out to Amazon" tab.</p>
     </div>
     <div class="action-bar" style="flex-wrap:wrap;">
       <button class="btn btn-primary" onclick="triggerImport('toShipAmazon')">📥 Import Amazon Shipment Qty</button>
       <button class="btn btn-ghost" onclick="downloadTemplate('toShipAmazon')">Download Template</button>
+      <label style="font-size:12px;color:var(--ink-soft);display:inline-flex;align-items:center;gap:6px;margin-left:auto;">
+        Deduct starting
+        <input type="number" min="0" value="${bufferDays}" onchange="updateAmazonBufferDays(this.value)"
+               style="width:56px;font-family:inherit;font-size:12px;border:1px solid var(--line);border-radius:4px;padding:4px 6px;">
+        day${bufferDays === 1 ? '' : 's'} before ship date
+      </label>
     </div>
     ${emptyBody}
     ${pending.length > 0 ? `
@@ -7886,8 +8629,16 @@ function removeProductDetailPackPhoto(id, idx) {
  * the warehouse sub-nav. Returns '' if there are no main products tracked yet.
  */
 function buildWarehouseReorderBannerHTML() {
-  const combined = getCombinedWarehouseReorder();
-  if (combined.length === 0) return '';
+  const amazonSkuSet = getAmazonScheduledSkuSet();
+  const allCombined = getCombinedWarehouseReorder();
+  // SKUs with a pending Amazon shipment move to the Shopify Health Check
+  // tab entirely — the flat Days of Cover here can't be trusted for them
+  // (see the Eye Patches example: 77 days here vs. 26 once the shipment is
+  // actually sequenced). They're excluded from this banner rather than
+  // shown with a possibly-wrong number.
+  const combined = allCombined.filter(p => !amazonSkuSet.has(p.sku));
+  const amazonScheduledCount = allCombined.length - combined.length;
+  if (combined.length === 0 && amazonScheduledCount === 0) return '';
 
   const order = { out: 0, critical: 1, reorder: 2, pipeline: 3, healthy: 4 };
   const attention = combined
@@ -8027,6 +8778,9 @@ function buildWarehouseReorderBannerHTML() {
           <div class="wh-reorder-expedite-note">Already enough production incoming to clear ${REORDER_DAYS} days of cover once it lands — no new order needed. But either the current batch won't arrive before the shelf hits zero, or a later batch in the pipeline won't arrive before an earlier one runs out — so push the supplier to speed up delivery.</div>
           ${expediteRows}
         ` : ''}
+        ${amazonScheduledCount > 0 ? `
+          <div class="wh-reorder-expedite-note" style="cursor:pointer;" onclick="setView('amazonImpact')">🚀 ${amazonScheduledCount} SKU${amazonScheduledCount === 1 ? '' : 's'} with an Amazon shipment scheduled — Days of Cover for ${amazonScheduledCount === 1 ? 'it' : 'them'} isn't shown here since a flat number can't be trusted once shipments are sequenced. <span style="text-decoration:underline;">See Shopify Health Check →</span></div>
+        ` : ''}
       </div>
     </details>`;
 }
@@ -8054,8 +8808,11 @@ function updateWarehouseReorderBanner(visible) {
  * no main products tracked yet.
  */
 function buildAmazonReorderBannerHTML() {
-  const combined = getCombinedWarehouseReorderAmazon();
-  if (combined.length === 0) return '';
+  const amazonSkuSet = getAmazonScheduledSkuSet();
+  const allCombined = getCombinedWarehouseReorderAmazon();
+  const combined = allCombined.filter(p => !amazonSkuSet.has(p.sku));
+  const amazonScheduledCount = allCombined.length - combined.length;
+  if (combined.length === 0 && amazonScheduledCount === 0) return '';
 
   const order = { out: 0, critical: 1, reorder: 2, pipeline: 3, healthy: 4 };
   const attention = combined
@@ -8185,6 +8942,9 @@ function buildAmazonReorderBannerHTML() {
           <div class="wh-reorder-expedite-heading">⏱ Needs expediting before next delivery</div>
           <div class="wh-reorder-expedite-note">Already enough production incoming to clear ${REORDER_DAYS} days of cover (incl. Amazon projection) once it lands — no new order needed. But either the current batch won't arrive before the shelf hits zero, or a later batch in the pipeline won't arrive before an earlier one runs out — so push the supplier to speed up delivery.</div>
           ${expediteRows}
+        ` : ''}
+        ${amazonScheduledCount > 0 ? `
+          <div class="wh-reorder-expedite-note" style="cursor:pointer;" onclick="setView('amazonImpact')">🚀 ${amazonScheduledCount} SKU${amazonScheduledCount === 1 ? '' : 's'} with an Amazon shipment scheduled — Days of Cover for ${amazonScheduledCount === 1 ? 'it' : 'them'} isn't shown here since a flat number can't be trusted once shipments are sequenced. <span style="text-decoration:underline;">See Shopify Health Check →</span></div>
         ` : ''}
       </div>
     </details>`;
@@ -8443,8 +9203,14 @@ function renderWHCard(warehouse, section, item, opts) {
                onfocus="this.select()">
       </div>`;
   } else {
-    const heldForAmazon = (warehouse === 'dayone' && item.sku) ? (getPendingAmazonHoldsBySku().get(item.sku) || 0) : 0;
-    const effectiveQty = Math.max(0, qty - heldForAmazon);
+    // Due-only here: this is the number the user reads as "what's on the
+    // shelf right now", so a shipment scheduled weeks out shouldn't make it
+    // look short. Not-yet-due commitments still get a separate, calmer note
+    // below so they're visible without reading as an alarm.
+    const dueForAmazon = (warehouse === 'dayone' && item.sku) ? (getPendingAmazonHoldsBySku({ dueOnly: true }).get(item.sku) || 0) : 0;
+    const allForAmazon = (warehouse === 'dayone' && item.sku) ? (getPendingAmazonHoldsBySku().get(item.sku) || 0) : 0;
+    const notYetDue = Math.max(0, allForAmazon - dueForAmazon);
+    const effectiveQty = Math.max(0, qty - dueForAmazon);
     body = `<div class="wh-card-body">
         <div class="wh-card-sku">${escapeHtml(item.sku || '— No SKU —')}${renderAltSkus(item)}</div>
         <div class="wh-card-name">${escapeHtml(item.name || '(Unnamed item)')}</div>
@@ -8452,7 +9218,8 @@ function renderWHCard(warehouse, section, item, opts) {
           <span class="wh-card-qty-label">Warehouse Qty</span>
           <span class="wh-card-qty-value">${fmtNum(effectiveQty)}</span>
         </div>
-        ${heldForAmazon > 0 ? `<div style="font-size:11px;color:${heldForAmazon > qty ? 'var(--status-critical)' : 'var(--status-pipeline)'};margin-top:2px;">🛫 ${fmtNum(heldForAmazon)} held for Amazon shipment (DayOne raw: ${fmtNum(qty)})</div>` : ''}
+        ${dueForAmazon > 0 ? `<div style="font-size:11px;color:${dueForAmazon > qty ? 'var(--status-critical)' : 'var(--status-pipeline)'};margin-top:2px;">🛫 ${fmtNum(dueForAmazon)} held for Amazon shipment (DayOne raw: ${fmtNum(qty)})</div>` : ''}
+        ${notYetDue > 0 ? `<div style="font-size:11px;color:var(--ink-mute);margin-top:2px;">📦 ${fmtNum(notYetDue)} more committed to a later Amazon shipment — not due yet</div>` : ''}
       </div>`;
   }
 
@@ -9293,47 +10060,8 @@ function renderDashboard() {
     ? visibleProducts.filter(p => p.name.toLowerCase().includes(_dashTerm) || p.sku.toLowerCase().includes(_dashTerm))
     : visibleProducts;
 
-  let rows = '';
-  filteredProducts.forEach(p => {
-    const barPct = Math.min(100, Math.max(2, (p.daysTotal / 180) * 100));
-    const barColor = p.status === 'healthy' ? 'var(--status-healthy)'
-                   : p.status === 'reorder' ? 'var(--status-reorder)'
-                   : p.status === 'pipeline' ? 'var(--status-pipeline)'
-                   : p.status === 'critical' ? 'var(--status-critical)'
-                   : 'var(--status-out)';
-    let actionBtn;
-    if (p.inProductionQty > 0) {
-      actionBtn = '<button class="action-btn pending" disabled title="Order already in production">In Production</button>';
-    } else if (p.status === 'healthy') {
-      actionBtn = '<button class="action-btn disabled" disabled>No Action Needed</button>';
-    } else {
-      const cls = p.status === 'critical' || p.status === 'out' ? 'crit' : 'warn';
-      actionBtn = `<button class="action-btn ${cls}" onclick="openOrder('${escapeAttr(p.sku)}')">Place Order</button>`;
-    }
-    const inProdCell = p.inProductionQty > 0
-      ? `<div>${fmtNum(p.inProductionQty)}</div>
-         ${p.soonestPromise ? `<div class="pipeline-meta">${escapeHtml(fmtDateRelative(p.soonestPromise))}</div>` : ''}`
-      : `<span style="color:var(--ink-mute)">—</span>`;
-    const statusLabel = { healthy:'Healthy', reorder:'Reorder Now', critical:'Critical', out:'Out of Stock', pipeline:'In Pipeline' }[p.status];
-
-    rows += `
-      <tr>
-        <td class="product-cell" data-label="Product">${escapeHtml(p.name)}${renderSkuTags(p)}</td>
-        <td class="numeric" data-label="Ready Stock">
-          <input type="number" class="stock-edit" value="${p.readyStock}" min="0"
-                 data-sku="${escapeAttr(p.sku)}" data-product-name="${escapeAttr(p.name)}" onclick="this.select()">
-        </td>
-        <td class="numeric" data-label="In Production">${inProdCell}</td>
-        <td class="numeric" data-label="ADS ${adsDays}d"><strong style="color:var(--ink)">${p.adsN.toFixed(1)}</strong></td>
-        <td class="days-cell" data-label="Days of Cover" data-sort-value="${isFinite(p.daysImmediate) ? p.daysImmediate : 99999}">
-          ${renderDaysOfCoverBlock(p.daysImmediate, p.daysTotal, p.inProductionQty, p.soonestPromise, p.batches, p.adsN)}
-          <div class="days-bar"><div class="days-bar-fill" style="width:${barPct}%; background:${barColor};"></div></div>
-        </td>
-        <td data-label="Status" data-sort-value="${statusOrder[p.status]}"><span class="status status-${p.status}">${statusLabel}</span></td>
-        <td data-label="Action">${actionBtn}</td>
-        ${dashboardEditActive ? `<td data-label="" class="dashboard-row-delete-cell"><button class="dashboard-row-delete" title="Hide this row from the dashboard" onclick="hideDashboardRow('${escapeAttr(p.sku)}')">✕</button></td>` : ''}
-      </tr>`;
-  });
+  const amazonSkuSet = getAmazonScheduledSkuSet();
+  const rows = filteredProducts.map(p => renderDashboardRow(p, adsDays, amazonSkuSet)).join('');
 
   const adsToggle = `
     <div class="view-toggle" style="margin-left: auto;">
@@ -10446,7 +11174,17 @@ function renderSales() {
         });
       });
     });
-    getPendingAmazonHoldsBySku().forEach((heldQty, sku) => {
+    // Two readings of Amazon commitments: due-only nets against "available
+    // now" (daysImmediate) so a shipment scheduled weeks out doesn't read
+    // as a shortage today; all (any date) nets against stock + production
+    // for the reorder trigger (daysTotal), so a big future commitment
+    // still surfaces the need to reorder — see getCombinedWarehouseReorder
+    // for the same split.
+    const rawStockBySku = new Map(stockBySku);
+    const dueHoldsBySku = getPendingAmazonHoldsBySku({ dueOnly: true });
+    const allHoldsBySku = getPendingAmazonHoldsBySku();
+    const amazonSkuSet = getAmazonScheduledSkuSet();
+    dueHoldsBySku.forEach((heldQty, sku) => {
       if (stockBySku.has(sku)) stockBySku.set(sku, Math.max(0, stockBySku.get(sku) - heldQty));
     });
     // In-production lookup
@@ -10506,13 +11244,23 @@ function renderSales() {
       const prodQty = prodEntry.qty;
 
       let docCell;
-      if (stock <= 0 && prodQty <= 0) {
+      if (amazonSkuSet.has(skuKey)) {
+        // Pending Amazon shipment — the flat Days of Cover here can't be
+        // trusted once that shipment is sequenced in (see the Shopify
+        // Health Check tab), so redirect there instead of showing a
+        // possibly-wrong number.
+        docCell = `<td class="doc-cell" data-label="Days of Cover" style="text-align:center;"><button class="btn btn-ghost" style="font-size:11px;" onclick="goToHealthCheckSku('${escapeAttr(skuKey)}')">🛒 See in Health Check →</button></td>`;
+      } else if (stock <= 0 && prodQty <= 0) {
         docCell = `<td class="doc-cell" data-label="Days of Cover" title="No warehouse stock or pipeline for this SKU"><span style="color:var(--ink-mute)">—</span></td>`;
       } else if (ads <= 0) {
         docCell = `<td class="doc-cell" data-label="Days of Cover" title="No sales yet — cover is effectively unlimited"><strong>∞</strong></td>`;
       } else {
         const daysImmediate = stock / ads;
-        const daysTotal     = (stock + prodQty) / ads;
+        // Reorder trigger nets every pending Amazon commitment (any date)
+        // against raw stock + production, not just the due ones.
+        const rawStock = rawStockBySku.get(skuKey) || 0;
+        const stockAllNet = Math.max(0, rawStock - (allHoldsBySku.get(skuKey) || 0));
+        const daysTotal = (stockAllNet + prodQty) / ads;
         const isLow = daysImmediate < REORDER_DAYS;
         docCell = `<td class="doc-cell ${isLow ? 'doc-low' : ''}" data-label="Days of Cover" title="${fmtNum(stock)} units in stock${prodQty > 0 ? ' · ' + fmtNum(prodQty) + ' in production' : ''} · ${ads.toFixed(1)} ADS">${renderDaysOfCoverBlock(daysImmediate, daysTotal, prodQty, prodEntry.soonestPromise, prodEntry.batches, ads, stock)}</td>`;
       }
@@ -10664,7 +11412,11 @@ function renderSalesAmazon() {
         });
       });
     });
-    getPendingAmazonHoldsBySku().forEach((heldQty, sku) => {
+    const rawStockBySku = new Map(stockBySku);
+    const dueHoldsBySku = getPendingAmazonHoldsBySku({ dueOnly: true });
+    const allHoldsBySku = getPendingAmazonHoldsBySku();
+    const amazonSkuSet = getAmazonScheduledSkuSet();
+    dueHoldsBySku.forEach((heldQty, sku) => {
       if (stockBySku.has(sku)) stockBySku.set(sku, Math.max(0, stockBySku.get(sku) - heldQty));
     });
     // In-production lookup — resolve each line item's SKU through the alias
@@ -10726,13 +11478,17 @@ function renderSalesAmazon() {
       const prodQty = prodEntry.qty;
 
       let docCell;
-      if (stock <= 0 && prodQty <= 0) {
+      if (amazonSkuSet.has(skuKey)) {
+        docCell = `<td class="doc-cell" data-label="Days of Cover" style="text-align:center;"><button class="btn btn-ghost" style="font-size:11px;" onclick="goToHealthCheckSku('${escapeAttr(skuKey)}')">🛒 See in Health Check →</button></td>`;
+      } else if (stock <= 0 && prodQty <= 0) {
         docCell = `<td class="doc-cell" data-label="Days of Cover" title="No warehouse stock or pipeline for this SKU"><span style="color:var(--ink-mute)">—</span></td>`;
       } else if (adsWithAmazon <= 0) {
         docCell = `<td class="doc-cell" data-label="Days of Cover" title="No sales yet — cover is effectively unlimited"><strong>∞</strong></td>`;
       } else {
         const daysImmediate = stock / adsWithAmazon;
-        const daysTotal     = (stock + prodQty) / adsWithAmazon;
+        const rawStock = rawStockBySku.get(skuKey) || 0;
+        const stockAllNet = Math.max(0, rawStock - (allHoldsBySku.get(skuKey) || 0));
+        const daysTotal = (stockAllNet + prodQty) / adsWithAmazon;
         const isLow = daysImmediate < REORDER_DAYS;
         docCell = `<td class="doc-cell ${isLow ? 'doc-low' : ''}" data-label="Days of Cover" title="${fmtNum(stock)} units in stock${prodQty > 0 ? ' · ' + fmtNum(prodQty) + ' in production' : ''} · ${ads.toFixed(1)} normal ADS + ${amazonProjection.toFixed(1)} Amazon projection = ${adsWithAmazon.toFixed(1)} combined ADS">${renderDaysOfCoverBlock(daysImmediate, daysTotal, prodQty, prodEntry.soonestPromise, prodEntry.batches, adsWithAmazon, stock)}</td>`;
       }
@@ -12517,6 +13273,18 @@ function parseExcelFile(file, moduleKey) {
     try {
       const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
       const ws = wb.Sheets[wb.SheetNames[0]];
+      if (moduleKey === 'toShipAmazon') {
+        // Amazon shipment plans commonly arrive as several stacked tables in
+        // one sheet, each under its own "TABLE n — CAN SHIP ON <date>" title
+        // (see parseAmazonShipmentAOA) rather than one flat header + rows —
+        // read as a raw grid so those title rows are visible at all.
+        const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false });
+        if (aoa.length === 0) { toast('Sheet is empty'); return; }
+        const parsed = parseAmazonShipmentAOA(aoa);
+        if (!parsed.items.length) { toast(parsed.error || 'Could not find any SKU/Quantity rows in this file'); return; }
+        importToShipAmazon(parsed.items);
+        return;
+      }
       const rows = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
       if (rows.length === 0) { toast('Sheet is empty'); return; }
       const headers = Object.keys(rows[0]);
@@ -12526,13 +13294,110 @@ function parseExcelFile(file, moduleKey) {
       else if (moduleKey === 'warehouseItems_dayone') importWarehouseItems(rows, headers, 'dayone');
       else if (moduleKey === 'partnerStock_bs')       importPartnerStock(rows, headers, 'bs');
       else if (moduleKey === 'partnerStock_dayone')   importPartnerStock(rows, headers, 'dayone');
-      else if (moduleKey === 'toShipAmazon')          importToShipAmazon(rows, headers);
     } catch (err) {
       console.error(err);
       toast('Could not read file');
     }
   };
   reader.readAsArrayBuffer(file);
+}
+
+// Pulls a ship date out of a table title like "TABLE 2 — CAN SHIP ON 9/25"
+// or "TABLE 1 — to be shipped 09/17", or a month-name form like "TABLE 2 —
+// CAN SHIP ON October 15". Tries numeric M/D[/Y] first, then falls back to
+// "<Month> <Day>[, Year]" / "<Day> <Month>[, Year]". If no year is given,
+// assumes the current year, then bumps a year forward if that would put the
+// date more than ~300 days in the past (handles a schedule that crosses a
+// year boundary, e.g. imported in late December for early-January dates).
+function parseAmazonTableDate(titleText) {
+  const s = String(titleText || '');
+  const MONTHS = { jan:0, feb:1, mar:2, apr:3, may:4, jun:5, jul:6, aug:7, sep:8, sept:8, oct:9, nov:10, dec:11 };
+  const buildDate = (month, day, yearRaw) => {
+    if (month < 0 || month > 11 || day < 1 || day > 31) return null;
+    const now = new Date();
+    let year = yearRaw ? (String(yearRaw).length === 2 ? 2000 + parseInt(yearRaw, 10) : parseInt(yearRaw, 10)) : now.getFullYear();
+    let d = new Date(year, month, day);
+    if (!yearRaw && (now.getTime() - d.getTime()) > 300 * 86400000) {
+      d = new Date(year + 1, month, day);
+    }
+    return isNaN(d.getTime()) ? null : toDateInputValue(d);
+  };
+
+  // Numeric: 9/25, 09/17/26, 9-25-2026
+  const numeric = s.match(/\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/);
+  if (numeric) {
+    const r = buildDate(parseInt(numeric[1], 10) - 1, parseInt(numeric[2], 10), numeric[3]);
+    if (r) return r;
+  }
+  // "<Month> <Day>[, Year]" e.g. "October 15", "Oct 15, 2026"
+  const monthFirst = s.match(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(\d{2,4}))?\b/i);
+  if (monthFirst) {
+    const r = buildDate(MONTHS[monthFirst[1].slice(0,3).toLowerCase()], parseInt(monthFirst[2], 10), monthFirst[3]);
+    if (r) return r;
+  }
+  // "<Day> <Month>[, Year]" e.g. "15 October 2026"
+  const dayFirst = s.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?(?:,?\s*(\d{2,4}))?\b/i);
+  if (dayFirst) {
+    const r = buildDate(MONTHS[dayFirst[2].slice(0,3).toLowerCase()], parseInt(dayFirst[1], 10), dayFirst[3]);
+    if (r) return r;
+  }
+  return null;
+}
+
+// Parses an Amazon shipment plan sheet read as a raw grid (header:1). Handles
+// both a single flat table (SKU / Product Name / Quantity[, Ship Date])
+// and a sheet with several stacked tables, each introduced by a title row
+// naming its ship date and its own header row underneath, separated by a
+// blank row — see the "TABLE n — CAN SHIP ON <date>" pattern in Fifi's
+// supplier files. A per-row "Ship Date" column, if present, wins over a
+// table-title date.
+function parseAmazonShipmentAOA(aoa) {
+  const normCell = h => String(h == null ? '' : h).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const isBlankRow = row => !row || row.every(c => String(c == null ? '' : c).trim() === '');
+  const findHeaderMap = row => {
+    let skuIdx = -1, nameIdx = -1, qtyIdx = -1, dateIdx = -1;
+    row.forEach((cell, i) => {
+      const n = normCell(cell);
+      if (skuIdx === -1 && (n === 'sku' || n === 'productcode' || n === 'itemcode')) skuIdx = i;
+      if (nameIdx === -1 && (n === 'productname' || n === 'product' || n === 'name' || n === 'itemname' || n === 'description')) nameIdx = i;
+      if (qtyIdx === -1 && (n === 'quantity' || n === 'qty' || n === 'units' || n === 'amount' || n.includes('quantity') || n.includes('qty') || n.includes('finalrecommendation') || n.includes('whatwecansend'))) qtyIdx = i;
+      if (dateIdx === -1 && (n === 'shipdate' || n === 'shipmentdate' || n === 'date' || n === 'scheduleddate' || n === 'canshipon')) dateIdx = i;
+    });
+    return skuIdx === -1 ? null : { skuIdx, nameIdx, qtyIdx, dateIdx };
+  };
+
+  let mode = 'seekingHeader'; // 'seekingHeader' | 'inTable'
+  let colMap = null;
+  let currentDate = null;
+  let currentLabel = '';
+  const items = [];
+
+  aoa.forEach(row => {
+    if (isBlankRow(row)) { mode = 'seekingHeader'; colMap = null; currentDate = null; return; }
+    if (mode === 'seekingHeader') {
+      const map = findHeaderMap(row);
+      if (map) { colMap = map; mode = 'inTable'; return; }
+      // Not a header row — treat as a table title and look for its date.
+      currentLabel = row.filter(c => String(c == null ? '' : c).trim() !== '').join(' ');
+      currentDate = parseAmazonTableDate(currentLabel);
+      return; // still seeking the header row underneath
+    }
+    // mode === 'inTable'
+    const sku = String(row[colMap.skuIdx] == null ? '' : row[colMap.skuIdx]).trim();
+    if (!sku) return;
+    const qty = colMap.qtyIdx === -1 ? NaN : toNum(row[colMap.qtyIdx]);
+    if (!isFinite(qty) || qty <= 0) return;
+    const name = colMap.nameIdx === -1 ? '' : String(row[colMap.nameIdx] == null ? '' : row[colMap.nameIdx]).trim();
+    const rowDateRaw = colMap.dateIdx === -1 ? '' : row[colMap.dateIdx];
+    const rowDate = rowDateRaw ? toDateInputValue(parseDate(rowDateRaw)) : '';
+    items.push({
+      sku, name, quantity: qty,
+      shipDate: rowDate || currentDate || null,
+      tableLabel: currentLabel
+    });
+  });
+
+  return { items, error: items.length ? null : 'No "SKU" column found in this sheet' };
 }
 
 function importSales(rows, headers) {
@@ -13279,18 +14144,11 @@ function importPartnerStock(rows, headers, warehouse) {
   showPartnerStockResult(warehouse, updates, unmatched, phasedOutUpdates);
 }
 
-function importToShipAmazon(rows, headers) {
-  const norm = h => String(h || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  let skuCol = null, nameCol = null, qtyCol = null;
-  headers.forEach(h => {
-    const n = norm(h);
-    if (!skuCol && (n === 'sku' || n === 'productcode' || n === 'itemcode')) skuCol = h;
-    if (!nameCol && (n === 'productname' || n === 'product' || n === 'name' || n === 'itemname' || n === 'description')) nameCol = h;
-    if (!qtyCol && (n === 'quantity' || n === 'qty' || n === 'units' || n === 'amount' || n.includes('finalrecommendation'))) qtyCol = h;
-  });
-  if (!skuCol) { toast('Could not find a "SKU" column'); return; }
-  if (!qtyCol) { toast('Could not find a "Quantity" column'); return; }
-
+// items: [{ sku, name, quantity, shipDate: 'YYYY-MM-DD'|null, tableLabel }],
+// as produced by parseAmazonShipmentAOA. A shipment with no ship date keeps
+// the old behaviour — counted as immediately due — so undated imports never
+// silently stop deducting.
+function importToShipAmazon(items) {
   // Look up product names / raw stock from DayOne so unmatched-name rows
   // still get a sensible label, and so we can flag SKUs DayOne doesn't
   // recognize at all (likely a typo or a SKU that hasn't landed yet).
@@ -13310,24 +14168,29 @@ function importToShipAmazon(rows, headers) {
   if (!Array.isArray(state.toShipAmazon)) state.toShipAmazon = [];
   let added = 0, updated = 0;
   const unmatchedSkus = [];
-  rows.forEach(r => {
-    const sku = String(r[skuCol] || '').trim();
+  let datedCount = 0;
+  items.forEach(r => {
+    const sku = String(r.sku || '').trim();
     if (!sku) return;
-    const qty = +r[qtyCol];
+    const qty = +r.quantity;
     if (!isFinite(qty) || qty <= 0) return;
-    const rawName = nameCol ? String(r[nameCol] || '').trim() : '';
+    const shipDate = r.shipDate || null;
+    if (shipDate) datedCount++;
     const dayoneItem = dayoneBySku.get(sku.toLowerCase());
     if (!dayoneItem) unmatchedSkus.push(sku);
     // DayOne's own record is the source of truth for name + photo once the
     // SKU matches — the imported file's name column is only a fallback for
     // SKUs DayOne doesn't recognize yet, since import files are often
     // blank, stale, or slightly misspelled on the name column.
-    const finalName = (dayoneItem && dayoneItem.name) ? dayoneItem.name : (rawName || sku);
+    const finalName = (dayoneItem && dayoneItem.name) ? dayoneItem.name : (String(r.name || '').trim() || sku);
     const finalPhoto = dayoneItem ? (dayoneItem.photo || '') : '';
 
-    // Re-importing the same still-pending SKU updates it in place instead of
-    // stacking a duplicate hold (which would double the deduction).
-    const existing = state.toShipAmazon.find(x => x.sku === sku && !x.shipped);
+    // Re-importing updates the same SKU + ship-date batch in place instead
+    // of stacking a duplicate hold. A different ship date for the same SKU
+    // is treated as a separate, later batch (matches the source files,
+    // which schedule the same SKU across more than one dated table) rather
+    // than merged into one.
+    const existing = state.toShipAmazon.find(x => x.sku === sku && !x.shipped && (x.shipDate || null) === shipDate);
     if (existing) {
       existing.quantity = qty;
       existing.name = finalName;
@@ -13338,6 +14201,7 @@ function importToShipAmazon(rows, headers) {
       state.toShipAmazon.unshift({
         id: uid('shipamz_'),
         sku, name: finalName, photo: finalPhoto, quantity: qty,
+        shipDate, shipDateSource: shipDate ? 'auto' : null,
         addedAt: Date.now(), shipped: false, shippedAt: null
       });
       added++;
@@ -13347,8 +14211,30 @@ function importToShipAmazon(rows, headers) {
   saveState();
   render();
   let msg = `${added} added, ${updated} updated`;
+  if (datedCount > 0) msg += ` · ${datedCount} with a detected ship date`;
   if (unmatchedSkus.length) msg += ` · ${unmatchedSkus.length} SKU${unmatchedSkus.length === 1 ? '' : 's'} not found in DayOne yet`;
   toast(msg);
+}
+
+// Lets the user correct or add a ship date after import (auto-detection
+// from a table title can miss or misread it). Passing an empty string
+// clears the date back to "no date on file" (always-due behaviour).
+function updateToShipAmazonDate(id, dateStr) {
+  const item = (state.toShipAmazon || []).find(x => x.id === id);
+  if (!item) return;
+  const clean = String(dateStr || '').trim();
+  if (clean && !parseDate(clean)) { toast('Could not read that date'); return; }
+  item.shipDate = clean || null;
+  item.shipDateSource = clean ? 'manual' : null;
+  saveState();
+  render();
+}
+
+function updateAmazonBufferDays(val) {
+  const n = +val;
+  state.amazonBufferDays = isFinite(n) && n >= 0 ? n : AMAZON_BUFFER_DAYS_DEFAULT;
+  saveState();
+  render();
 }
 
 function showPartnerStockResult(warehouse, updates, unmatched, phasedOutUpdates) {
@@ -13645,11 +14531,16 @@ function downloadTemplate(moduleKey) {
     ];
     filename = 'facelove-warehouse-template.xlsx';
   } else if (moduleKey === 'toShipAmazon') {
-    headers = ['SKU', 'Product Name', 'Quantity'];
+    // "Ship Date" is optional — leave it blank and the shipment counts as
+    // immediately due, same as before. Multi-table files with a "TABLE n —
+    // CAN SHIP ON <date>" title per batch are also supported directly (the
+    // date is picked up from each title automatically); this flat layout is
+    // just the simplest single-batch case.
+    headers = ['SKU', 'Product Name', 'Quantity', 'Ship Date'];
     exampleRows = [
-      ['DPCD2-XD572001', 'Everlove Mascara - For Mature Lashes - (Ironeye 2.0) — Intense Black', 15840],
-      ['DPCD2-CC582001', 'Changing Foundation Stick — Default Title',                            11790],
-      ['DPCD2-XD572002', 'Everlove Mascara - For Mature Lashes - (Ironeye 2.0) — Balm Brown',     3600]
+      ['DPCD2-XD572001', 'Everlove Mascara - For Mature Lashes - (Ironeye 2.0) — Intense Black', 15840, todayISO()],
+      ['DPCD2-CC582001', 'Changing Foundation Stick — Default Title',                            11790, addDaysISO(todayISO(), 8)],
+      ['DPCD2-XD572002', 'Everlove Mascara - For Mature Lashes - (Ironeye 2.0) — Balm Brown',     3600, addDaysISO(todayISO(), 8)]
     ];
     filename = 'facelove-to-ship-amazon-template.xlsx';
   }
@@ -14020,6 +14911,20 @@ function getPOLineItems(poNumber) {
   const po = findPOByNumber(poNumber);
   return po ? (po.lineItems || []) : [];
 }
+// The PO's finish date is derived straight from Current Production, not
+// typed in by hand: the latest promiseDate (or actualProductionEndDate,
+// once production is done) across every line item on this PO — since the
+// order isn't fully finished until its slowest-finishing SKU is. Falls
+// back to null if there are no matching Production line items yet (e.g.
+// the contract was just uploaded and Production hasn't been entered).
+function getAutoFinishDateFromLineItems(lineItems) {
+  let latest = '';
+  (lineItems || []).forEach(li => {
+    const d = li.actualProductionEndDate || li.promiseDate || '';
+    if (d && d > latest) latest = d;
+  });
+  return latest || null;
+}
 function paymentAppliesToSku(payment, sku) {
   if (!payment) return false;
   if (!Array.isArray(payment.skuAllocations)) return true; // null = all SKUs
@@ -14034,80 +14939,38 @@ function getAllBalanceInvoices(rec) {
   });
   return out;
 }
-// Delivery date for a SKU = the latest dated invoice (2nd/3rd payment —
-// balance invoices, never the deposit) that covers it. Requires an actual
-// attached file — a date/amount typed in without the invoice on file isn't
-// treated as confirmed. Falls back to the planned promiseDate/
-// actualProductionEndDate from Production, marked as estimated, if no
-// balance invoice (with a file) has been logged against it yet.
-function getSkuDeliveryInfo(rec, li) {
-  const dated = getAllBalanceInvoices(rec).filter(inv => inv && inv.date && inv.docId);
-  const applicable = dated.filter(inv => paymentAppliesToSku(inv, li.sku));
-  if (applicable.length) {
-    const latest = applicable.reduce((a,b) => (a.date > b.date ? a : b));
-    return { date: latest.date, estimated: false, paid: true };
-  }
-  const fallback = li.promiseDate || li.actualProductionEndDate || '';
-  return { date: fallback, estimated: !!fallback, paid: false };
-}
-// Pulls the instalment percentages straight from the PO's stored payment
-// terms text (e.g. "30% deposit..., 30% second payment..., 40% balance...")
-// so the breakdown always reflects that PO's actual contracted split,
-// rather than assuming every PO is the same 30/30/40 pattern. Falls back
-// to no percentages shown if the terms text doesn't parse cleanly.
-function parsePaymentTermPercents(paymentTerms) {
-  return [...String(paymentTerms || '').matchAll(/(\d{1,3})\s*%/g)].map(m => +m[1]);
-}
-// Per-SKU instalment breakdown: "30% Deposit — Paid", "30% 2nd Payment —
-// Due", etc. Deposit applies to every SKU once it has an invoice on file;
-// 2nd/3rd only count as paid for a SKU if an invoice *tagged to that SKU*
-// (with a file attached) exists in that column. Skips the 3rd line
-// entirely for 2-instalment-only POs.
-function getSkuInstalmentBreakdown(rec, li) {
-  const pcts = parsePaymentTermPercents(rec.paymentTerms);
-  const lines = [];
-  const dep = rec.payments?.[0];
-  const depPaid = !!(dep && dep.invoiceDocId);
-  lines.push({ pct: pcts[0], name: 'Deposit', paid: depPaid });
-
-  const secondPaid = (rec.payments?.[1]?.invoices || []).some(inv => inv.docId && paymentAppliesToSku(inv, li.sku));
-  lines.push({ pct: pcts[1], name: '2nd Payment', paid: secondPaid });
-
-  if (!rec.twoInstalmentOnly) {
-    const thirdPaid = (rec.payments?.[2]?.invoices || []).some(inv => inv.docId && paymentAppliesToSku(inv, li.sku));
-    lines.push({ pct: pcts[2], name: '3rd Payment', paid: thirdPaid });
-  }
-  return lines;
-}
 // Status chip for a 2nd/3rd payment column: null (nothing logged yet),
 // 'full' (every SKU on the PO is covered by at least one invoice *with an
 // attached file* in this column), or 'partial' (some, but not all). Invoice
 // rows without a file attached don't count — a typed-in date/amount alone
-// isn't treated as paid. If the PO has no matching Production line items to
+// isn't treated as confirmed. If the PO has no matching Production line items to
 // check coverage against, falls back to 'logged' rather than guessing.
 // ---- Estimated payment dates (before any invoice exists) ----
 // Once an invoice is actually logged, its real date takes over everywhere
 // else in the UI — these are only ever shown as a placeholder guess for a
 // column that's still empty, so Fifi/Sven know roughly when to expect it.
-const SECOND_PAYMENT_LEAD_DAYS = 38;  // contract/order date -> estimated 2nd payment
 const THIRD_PAYMENT_LAG_DAYS = 30;    // 2nd payment date -> estimated 3rd payment
 
-function getEstimatedSecondPaymentDate(rec) {
-  if (!rec.orderDate || !parseDate(rec.orderDate)) return null;
-  return addDaysISO(rec.orderDate, SECOND_PAYMENT_LEAD_DAYS);
+// 2nd payment is due upon delivery — so its estimated date is simply the
+// PO's finish date (the latest Production promise date across every SKU on
+// the order, see getAutoFinishDateFromLineItems), not a fixed lead time
+// from the contract date. Falls back to null if Production has no line
+// items for this PO yet.
+function getEstimatedSecondPaymentDate(rec, lineItems) {
+  return getAutoFinishDateFromLineItems(lineItems);
 }
 
 // The anchor the 3rd-payment estimate counts 30 days from — prefers a real
-// logged 2nd-payment invoice date over the 38-day guess once one exists.
-function getSecondPaymentAnchorDate(rec) {
+// logged 2nd-payment invoice date over the finish-date guess once one exists.
+function getSecondPaymentAnchorDate(rec, lineItems) {
   const loggedDates = (rec.payments?.[1]?.invoices || []).map(inv => inv.date).filter(Boolean).sort();
   if (loggedDates.length) return { date: loggedDates[loggedDates.length - 1], isEstimate: false };
-  const est = getEstimatedSecondPaymentDate(rec);
+  const est = getEstimatedSecondPaymentDate(rec, lineItems);
   return { date: est, isEstimate: !!est };
 }
 
-function getEstimatedThirdPaymentDate(rec) {
-  const anchor = getSecondPaymentAnchorDate(rec);
+function getEstimatedThirdPaymentDate(rec, lineItems) {
+  const anchor = getSecondPaymentAnchorDate(rec, lineItems);
   if (!anchor.date) return null;
   return addDaysISO(anchor.date, THIRD_PAYMENT_LAG_DAYS);
 }
@@ -14138,7 +15001,7 @@ function getPayLifecycleStatus(rec, lineItems) {
   if (!depositPaid) return { label: 'Next Due: Deposit', tone: 'due' };
 
   const status2 = getPayColumnStatus(rec, 1, lineItems);
-  if (!status2) return { label: 'Initial Deposit Paid', tone: 'paid' };
+  if (!status2) return { label: 'Next Due: 2nd Payment upon Delivery', tone: 'depositonly' };
   if (status2 !== 'full') return { label: 'Next Due: 2nd Payment', tone: 'due' };
   if (rec.twoInstalmentOnly) return { label: 'Fully Paid', tone: 'paid' };
 
@@ -14279,12 +15142,6 @@ function restorePayRecordFromArchive(id) {
   rec.archived = false;
   saveState(); render();
   toast('Restored to active payments');
-}
-
-let paySkuExpanded = new Set();
-function togglePaySkuExpand(id) {
-  if (paySkuExpanded.has(id)) paySkuExpanded.delete(id); else paySkuExpanded.add(id);
-  render();
 }
 
 // The "target total" for a whole 2nd/3rd payment tranche (typed in once
@@ -14602,50 +15459,6 @@ function renderProductionSchedule() {
 
 
 
-// SKU-by-SKU breakdown for a PO: which line items are covered by which
-// instalment, and — the actual point of this — a delivery date per SKU,
-// derived from whichever balance payment settled it (falling back to the
-// planned Production promise date if it hasn't been paid/logged yet).
-function renderPaySkuBreakdown(rec, lineItems) {
-  if (!lineItems.length) {
-    return `<div class="pay-sku-empty">No matching Production PO found for "${escapeHtml(rec.poNumber || '')}" — add line items in In Production / Completed to see a per-SKU breakdown here.</div>`;
-  }
-  const rows = lineItems.map(li => {
-    const info = getSkuDeliveryInfo(rec, li);
-    const instalments = getSkuInstalmentBreakdown(rec, li);
-    const statusLines = instalments.map(inst => {
-      const pctLabel = inst.pct != null ? `${inst.pct}% ` : '';
-      return `<div class="pay-sku-instalment-line ${inst.paid ? 'pay-sku-instalment-paid' : 'pay-sku-instalment-due'}">${inst.paid ? '✅' : '◻'} ${pctLabel}${inst.name} — ${inst.paid ? 'Paid' : 'Due'}</div>`;
-    }).join('');
-    const dateLabel = info.date
-      ? `${fmtDateShort(info.date)}${info.estimated ? ' <span class="pay-sku-est">(est.)</span>' : ''}`
-      : '—';
-    const photo = li.photo || findWarehousePhotoBySku(li.sku);
-    const photoCell = photo
-      ? `<div class="pay-sku-photo"><img src="${escapeAttr(photo)}" alt=""></div>`
-      : `<div class="pay-sku-photo pay-sku-photo-empty">—</div>`;
-    return `
-      <tr>
-        <td class="pay-sku-photo-cell">${photoCell}</td>
-        <td class="pay-sku-center">${escapeHtml(li.sku || '—')}</td>
-        <td class="pay-sku-center">${escapeHtml(li.name || '—')}</td>
-        <td>${(+li.quantity || 0).toLocaleString('en-GB')}</td>
-        <td class="pay-sku-status-cell">${statusLines}</td>
-        <td>${dateLabel}</td>
-      </tr>`;
-  }).join('');
-  return `
-    <div class="pay-sku-breakdown">
-      <div class="pay-sku-breakdown-title">Payments by SKU</div>
-      <table class="pay-sku-table">
-        <thead>
-          <tr><th>Photo</th><th>SKU</th><th>Product</th><th>Qty</th><th>Status</th><th>Delivery Date</th></tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>`;
-}
-
 // ---- Payment-due notification banner (top of Payment Tracker tabs) ----
 // Scans every active (non-archived) PO's 2nd/3rd payment columns for a
 // contractual due date (targetDueDate) that falls within the current
@@ -14722,7 +15535,7 @@ function getPaymentsDueThisMonth() {
       let dueDate = p.targetDueDate || (unpaidInvoices.map(inv => inv.date).filter(Boolean).sort()[0] || '');
       let isEstimate = false;
       if (!dueDate && !invoices.length) {
-        const est = idx === 1 ? getEstimatedSecondPaymentDate(rec) : getEstimatedThirdPaymentDate(rec);
+        const est = idx === 1 ? getEstimatedSecondPaymentDate(rec, lineItems) : getEstimatedThirdPaymentDate(rec, lineItems);
         if (est) { dueDate = est; isEstimate = true; }
       }
       if (!dueDate) return;
@@ -14822,7 +15635,7 @@ function renderPaymentScheduleByEntity(entityFilter, archived) {
     const p = rec.payments || [];
     const editing = editingPayRows.has(rec.id);
     const lineItems = getPOLineItems(rec.poNumber);
-    const expanded = paySkuExpanded.has(rec.id);
+    const autoFinish = getAutoFinishDateFromLineItems(lineItems);
 
     // SKU tagging on a single invoice entry within a 2nd/3rd payment column.
     const skuTagUI = (idx, inv) => {
@@ -14878,8 +15691,8 @@ function renderPaymentScheduleByEntity(entityFilter, archived) {
       let dueDate = p[idx]?.targetDueDate;
       let isEstimatedDate = false;
       if (!dueDate) {
-        const est = idx === 1 ? getEstimatedSecondPaymentDate(rec)
-          : (idx === 2 && !rec.twoInstalmentOnly ? getEstimatedThirdPaymentDate(rec) : null);
+        const est = idx === 1 ? getEstimatedSecondPaymentDate(rec, lineItems)
+          : (idx === 2 && !rec.twoInstalmentOnly ? getEstimatedThirdPaymentDate(rec, lineItems) : null);
         if (est) { dueDate = est; isEstimatedDate = true; }
       }
       if (target == null && !dueDate) return '';
@@ -15014,8 +15827,7 @@ function renderPaymentScheduleByEntity(entityFilter, archived) {
       orderCell = `
         <span class="pay-instalment-label">Start</span>
         <input type="date" class="pay-mini-input" data-pay-id="${escapeAttr(rec.id)}" data-pay-field="orderDate" value="${escapeAttr(rec.orderDate||'')}">
-        <span class="pay-instalment-label" style="margin-top:6px;display:inline-block;">Finish</span>
-        <input type="date" class="pay-mini-input" data-pay-id="${escapeAttr(rec.id)}" data-pay-field="finishDate" value="${escapeAttr(rec.finishDate||'')}">`;
+        <div class="pay-contract-date" style="margin-top:6px;"><span class="pay-instalment-label">Finish</span> ${autoFinish ? `${fmtDateShort(autoFinish)} <span class="pay-sku-est">(auto, from Production)</span>` : '<span style="color:var(--ink-mute);">— no Production line items yet</span>'}</div>`;
       totalCell = `
         <input type="number" step="0.01" class="pay-mini-input" data-pay-id="${escapeAttr(rec.id)}" data-pay-field="totalAmount" value="${rec.totalAmount ?? ''}" placeholder="Total">
         <input type="text" class="pay-mini-input" data-pay-id="${escapeAttr(rec.id)}" data-pay-field="currency" value="${escapeAttr(rec.currency||'RMB')}" style="margin-top:4px;width:60px;">`;
@@ -15023,7 +15835,7 @@ function renderPaymentScheduleByEntity(entityFilter, archived) {
       poCell = `<div class="pay-po-view">${escapeHtml(rec.poNumber || '(No PO #)')}</div>${rec.entity ? `<span class="doc-tag doc-tag-po" style="margin-top:4px;display:inline-block;">${escapeHtml(rec.entity)}</span>` : ''}`;
       orderCell = `
         <div class="pay-contract-date"><span class="pay-instalment-label">Start</span> ${fmtDateShort(rec.orderDate)}</div>
-        <div class="pay-contract-date"><span class="pay-instalment-label">Finish</span> ${fmtDateShort(rec.finishDate)}</div>`;
+        <div class="pay-contract-date"><span class="pay-instalment-label">Finish</span> ${autoFinish ? fmtDateShort(autoFinish) : '—'}</div>`;
       totalCell = `<div class="pay-total-display pay-total-display-view">${fmtMoneyConverted(rec.totalAmount, rec.currency)}</div>`;
     }
     contractCell = `<div class="pay-files-inner">${fileBtn(poDoc, 'po', 'PO', '📄')}</div>`;
@@ -15032,11 +15844,6 @@ function renderPaymentScheduleByEntity(entityFilter, archived) {
     const depositCellHTML = depositCell(view);
     const secondCellHTML = balanceColumn(1, '2nd Payment', view);
     const thirdCellHTML = balanceColumn(2, '3rd Payment', view);
-
-    const toggleBannerRow = `<tr class="pay-sku-toggle-row"><td colspan="${TOTAL_COLS}"><button class="pay-sku-toggle-banner" onclick="togglePaySkuExpand('${escapeAttr(rec.id)}')">${expanded ? '▾ Click to hide product status' : '▸ Click to see all product status'}</button></td></tr>`;
-    const breakdownRow = expanded
-      ? `<tr class="pay-sku-breakdown-row"><td colspan="${TOTAL_COLS}">${renderPaySkuBreakdown(rec, lineItems)}</td></tr>`
-      : '';
 
     const lifecycle = getPayLifecycleStatus(rec, lineItems);
     const paidToggleHTML = `<span class="pay-paiddue-badge pay-paiddue-${lifecycle.tone}">${lifecycle.tone === 'paid' ? '✓' : '●'} ${escapeHtml(lifecycle.label)}</span>`;
@@ -15058,7 +15865,7 @@ function renderPaymentScheduleByEntity(entityFilter, archived) {
             <button class="pay-file-btn pay-delete-btn" onclick="deletePayRecord('${escapeAttr(rec.id)}')" title="Delete row">${trashIconSVG()}</button>
           </div>
         </td>
-      </tr>${toggleBannerRow}${breakdownRow}<tr class="pay-group-divider"><td colspan="${TOTAL_COLS}"></td></tr>`;
+      </tr><tr class="pay-group-divider"><td colspan="${TOTAL_COLS}"></td></tr>`;
   }).join('');
 
   const archiveView = entityFilter === 'US' ? 'usInvoicesArchive' : 'euInvoicesArchive';
@@ -15072,7 +15879,7 @@ function renderPaymentScheduleByEntity(entityFilter, archived) {
       <h1 class="page-title">${archived ? '🗄️' : '💰'} ${entityFilter === 'US' ? 'US Invoices' : 'DE/EU Invoices'}${archived ? ' — Archived' : ''}</h1>
       <p class="page-subtitle">${archived
         ? 'Completed transactions moved out of the active list. Restore any of these back to active any time.'
-        : `Total cost, order &amp; finish dates, and the payment schedule for every ${entityFilter} manufacturer PO — with linked PO/Invoice files. 2nd &amp; 3rd payments can hold multiple partial invoices when different SKUs finish at different times. Click the banner under any row to see payments broken down by SKU, including delivery date.`}</p>
+        : `Total cost, order &amp; finish dates, and the payment schedule for every ${entityFilter} manufacturer PO — with linked PO/Invoice files. Finish date is auto-detected from Current Production's promise dates. 2nd &amp; 3rd payments can hold multiple partial invoices when different SKUs finish at different times.`}</p>
     </div>
     ${renderCurrencyToggleBar()}
     ${archived ? '' : renderPaymentDueBannerHTML()}
@@ -15450,16 +16257,17 @@ function parseLeadTimesFromText(flat) {
   return { default: dflt, brush };
 }
 
-// Manufacturer PDFs here sign off with a "D-MMM-YY" date (e.g. "5-Aug-26")
-// rather than the "Month DD, YYYY" style — tried second since it's specific
-// to this template and less likely to false-positive on other text.
+// Manufacturer PDFs here sign off with a "D-MMM-YY" date (e.g. "5-Aug-26"
+// or "27/Aug/26" — this template uses both dashes and slashes) rather than
+// the "Month DD, YYYY" style — tried second since it's specific to this
+// template and less likely to false-positive on other text.
 function parseFlexibleDate(flat) {
   const long = flat.match(/([A-Z][a-z]+)\s*(\d{1,2}),?\s*(\d{4})/);
   if (long) {
     const d = new Date(`${long[1]} ${long[2]}, ${long[3]}`);
     if (!isNaN(d)) return d.toISOString().slice(0, 10);
   }
-  const short = flat.match(/\b(\d{1,2})-([A-Za-z]{3})-(\d{2,4})\b/);
+  const short = flat.match(/\b(\d{1,2})[\/\-]([A-Za-z]{3})[\/\-](\d{2,4})\b/);
   if (short) {
     const yr = short[3].length === 2 ? '20' + short[3] : short[3];
     const d = new Date(`${short[2]} ${short[1]}, ${yr}`);
