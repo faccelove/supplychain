@@ -7576,7 +7576,13 @@ function runStockSimulation({ startStock, ads, batches, holds }) {
       const daysToZero = stock / ads;
       if (daysToZero < daysElapsed) {
         const oosStart = new Date(cursorDate.getTime() + Math.max(0, daysToZero) * 86400000);
-        oosPeriods.push({ start: oosStart, end: ev.date, days: Math.max(1, Math.round((ev.date - oosStart) / 86400000)), endEventType: ev.type, endEventQty: ev.qty });
+        // The minimum extra stock that would need to land by oosStart to
+        // prevent this gap entirely — NOT the full quantity of whatever
+        // delivery happens to end it. A 100-pc delivery closing a 5-day
+        // gap at 1/day ADS only needs ~5 of those 100 pcs to actually
+        // arrive on time; the rest can stay on its original schedule.
+        const deficitQty = Math.max(0, ads * daysElapsed - stock);
+        oosPeriods.push({ start: oosStart, end: ev.date, days: Math.max(1, Math.round((ev.date - oosStart) / 86400000)), endEventType: ev.type, endEventQty: ev.qty, deficitQty });
         points.push({ date: oosStart, stock: 0, label: 'Sold out', type: 'oos' });
         stockBeforeEvent = 0;
         if (daysToZero > 0.1) soldSegments.push({ from: cursorDate, to: oosStart, days: daysToZero, qty: stock, ads });
@@ -7722,7 +7728,9 @@ function classifyAmazonHealthSku(sim) {
   }
   const gap = sim.oosPeriods.find(o => o.start < sim.lastEventDate && o.endEventType === 'production');
   if (gap) {
-    return { tier: 'expedite', neededBy: gap.start, qty: gap.endEventQty, arrivesOn: gap.end, gapDays: gap.days };
+    // Only the actual deficit needs to arrive early — not the whole
+    // delivery. Round up since you can't expedite a fractional unit.
+    return { tier: 'expedite', neededBy: gap.start, qty: Math.ceil(gap.deficitQty), fullDeliveryQty: gap.endEventQty, arrivesOn: gap.end, gapDays: gap.days };
   }
   if (sim.amazonImpacts.some(i => i.shortfall > 0)) {
     return { tier: 'reorder-now' };
@@ -7969,7 +7977,7 @@ function renderAmazonShopifyImpact() {
       const neededByLabel = sim.health.neededBy.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
       const arrivesOnLabel = sim.health.arrivesOn.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
       expediteHeader = `<div style="background:var(--status-reorder-bg);color:#8A6D16;border-radius:6px;padding:8px 10px;font-size:12.5px;font-weight:600;">
-        ⏱ Needs ${fmtNum(sim.health.qty)} pcs expedited completion on ${neededByLabel} to close a ${sim.health.gapDays}-day stockout gap (currently scheduled to arrive ${arrivesOnLabel})
+        ⏱ Needs at least ${fmtNum(sim.health.qty)} pcs to land by ${neededByLabel} to close a ${sim.health.gapDays}-day stockout gap — pull that much forward from the ${fmtNum(sim.health.fullDeliveryQty)}-pc delivery currently due ${arrivesOnLabel}; the rest can stay on schedule
       </div>`;
     }
 
@@ -8063,7 +8071,7 @@ function buildHealthCheckNotificationHTML(reorderNowRows, expediteRows) {
             <div class="health-notif-row">
               <div class="wh-reorder-row-info">
                 <div class="wh-reorder-row-sku">${escapeHtml(sim.sku)}</div>
-                <div class="wh-reorder-row-name">${escapeHtml(sim.name)} — needs ${fmtNum(sim.health.qty)} pcs expedited by ${sim.health.neededBy.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</div>
+                <div class="wh-reorder-row-name">${escapeHtml(sim.name)} — needs ${fmtNum(sim.health.qty)} pcs to land by ${sim.health.neededBy.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</div>
               </div>
               <button class="btn btn-ghost health-notif-see" onclick="goToHealthCheckSku('${escapeAttr(sim.sku)}')">See →</button>
             </div>`).join('')}
