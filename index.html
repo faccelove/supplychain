@@ -7937,12 +7937,12 @@ function renderAmazonShopifyImpact() {
       const daysElapsedLabel = imp.daysElapsed >= 1 ? Math.round(imp.daysElapsed) : Math.round(imp.daysElapsed * 10) / 10;
       const howText = imp.shortfall > 0
         ? `${fmtNum(imp.stockEnteringSegment)} on hand · − ${fmtNum(Math.round(imp.sold))} sold over ${daysElapsedLabel}d (${imp.ads.toFixed(1)}/day ADS) = ${fmtNum(Math.round(imp.stockBeforeShipment))} on hand right before shipping · Amazon needs ${fmtNum(imp.qty)}, so it's ${fmtNum(Math.ceil(imp.shortfall))} short.`
-        : `${fmtNum(Math.round(imp.stockEnteringSegment))} on hand · − ${fmtNum(Math.round(imp.sold))} sold over ${daysElapsedLabel}d (${imp.ads.toFixed(1)}/day ADS) = ${fmtNum(Math.round(imp.stockBeforeShipment))} before shipping · − ${fmtNum(imp.qty)} shipped to Amazon = ${fmtNum(Math.round(imp.stockAfter))} left ÷ ${imp.ads.toFixed(1)} ADS = ${fmtDays(imp.daysOfCoverAfter)}.`;
+        : `${fmtNum(Math.round(imp.stockEnteringSegment))} on hand · − ${fmtNum(Math.round(imp.sold))} sold over ${daysElapsedLabel}d (${imp.ads.toFixed(1)}/day ADS) = ${fmtNum(Math.round(imp.stockBeforeShipment))} before shipping · − ${fmtNum(imp.qty)} shipped to Amazon = ${fmtNum(Math.round(imp.stockAfter))} left ÷ ${imp.ads.toFixed(1)} ADS = ${fmtDays(imp.daysOfCoverAfter)}. This is a snapshot right after this one shipment — it doesn't look ahead to any later delivery that might already be scheduled (check the chart below for that).`;
       return `<div style="padding:6px 0;border-bottom:1px solid var(--line-soft);font-size:12.5px;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
           <span style="color:var(--ink-soft);">${dateLabel} · ship ${fmtNum(imp.qty)} pcs</span>
           <span style="display:flex;align-items:center;gap:6px;">
-            <span style="color:${color};font-weight:600;">${imp.shortfall > 0 ? `⚠ short ${fmtNum(Math.ceil(imp.shortfall))} pcs at ship time` : `${fmtDays(imp.daysOfCoverAfter)} Days of Cover left`}</span>
+            <span style="color:${color};font-weight:600;">${imp.shortfall > 0 ? `⚠ short ${fmtNum(Math.ceil(imp.shortfall))} pcs at ship time` : `${fmtDays(imp.daysOfCoverAfter)} Days of Cover if nothing else arrives`}</span>
             <span onclick="toggleImpactHow('${howId}')" style="font-size:9.5px;color:var(--ink-mute);cursor:pointer;text-decoration:underline dotted;user-select:none;">how?</span>
           </span>
         </div>
