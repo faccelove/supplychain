@@ -7682,15 +7682,21 @@ function runStockSimulation({ startStock, ads, batches, holds }) {
   return { ads, startStock, points, oosPeriods, amazonImpacts, soldSegments, horizonDate, lastEventDate, stockAfterLastEvent, triggerDays, reorderDate, reorderOverdue, endsAtRunout, continuesBeyondHorizon };
 }
 
-// Convenience wrapper for the health-check tab: looks up a SKU's own stock/
-// ADS/batches/holds and runs the simulation.
-function simulateAmazonImpactTimeline(sku) {
+// Convenience wrapper: looks up a SKU's own stock/batches/holds and runs
+// the simulation. Works for any SKU, not just ones with a pending Amazon
+// shipment — holds is simply empty for those, and the simulation just
+// shows the production/sales timeline on its own. Used by both the Health
+// Check tab (no adsOverride — uses the rollup's own ADS window) and the
+// Avg Daily Sales tables' per-row "see timeline graph" toggle, which pass
+// their own displayed ADS so the graph always matches what that row shows.
+function simulateAmazonImpactTimeline(sku, adsOverride) {
   const rollup = getCombinedWarehouseReorder();
   const row = rollup.find(p => p.sku === sku);
   if (!row) return null;
   const holds = (state.toShipAmazon || []).filter(h => !h.shipped && h.sku === sku);
   const startStock = Math.max(0, (+row.bsQty || 0) + (+row.dayoneQty || 0));
-  const sim = runStockSimulation({ startStock, ads: row.adsN, batches: row.batches, holds });
+  const ads = adsOverride != null && isFinite(+adsOverride) ? +adsOverride : row.adsN;
+  const sim = runStockSimulation({ startStock, ads, batches: row.batches, holds });
   return { sku, name: row.name, ...sim };
 }
 
@@ -7748,11 +7754,48 @@ function renderAmazonImpactSVG(sim) {
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const t0 = sim.points[0].date.getTime();
   const t1 = sim.horizonDate.getTime();
-  const span = Math.max(1, t1 - t0);
   const maxStock = Math.max(1, ...sim.points.map(p => p.stock));
-  const x = d => padL + ((d.getTime() - t0) / span) * plotW;
   const y = v => padT + plotH - (Math.max(0, v) / maxStock) * plotH;
-  const pxPerDay = plotW / (span / 86400000);
+
+  // A SKU with a dense run of deliveries followed by a long, mostly-empty
+  // declining tail (nothing scheduled after the last known event) would,
+  // on a plain linear date axis, spend most of its width on that empty
+  // tail and squeeze every actual event into a narrow sliver — which is
+  // exactly what was cramming labels together. So the axis is split in
+  // two: everything up to the last known event gets a fixed 68% of the
+  // width regardless of how many days that spans, and the tail gets the
+  // remaining 32% — giving the part with real information the room it
+  // needs, and letting the empty decline stay visually simple. Falls back
+  // to a single linear scale when there are no known events at all (the
+  // split would otherwise collapse to a single point).
+  const lastEventTime = sim.lastEventDate.getTime();
+  const hasEvents = lastEventTime > t0;
+  const preFrac = 0.68;
+  const preSpan = Math.max(1, lastEventTime - t0);
+  const postSpan = Math.max(1, t1 - lastEventTime);
+  const x = hasEvents
+    ? (d => {
+        // Clamp to "today" first — a stale/overdue production promise
+        // date earlier than today would otherwise produce a point with
+        // t < t0, which fell left of the y-axis entirely (off the visible
+        // plot, sometimes off the SVG itself). Today is always the
+        // leftmost thing on this chart no matter what a raw date says.
+        const t = Math.max(d.getTime(), t0);
+        return t <= lastEventTime
+          ? padL + ((t - t0) / preSpan) * (plotW * preFrac)
+          : padL + plotW * preFrac + ((t - lastEventTime) / postSpan) * (plotW * (1 - preFrac));
+      })
+    : (d => padL + ((Math.max(d.getTime(), t0) - t0) / Math.max(1, t1 - t0)) * plotW);
+  // Used only to decide whether a "sold" segment/tick is wide enough to
+  // label — approximate using the tail's own scale near the far end, and
+  // the dense-region scale otherwise, so a short segment in the packed
+  // portion isn't wrongly treated as roomy just because the tail is wide.
+  const pxPerDayAt = d => {
+    const t = Math.max(d.getTime(), t0);
+    return t <= lastEventTime
+      ? (plotW * preFrac) / Math.max(1, preSpan / 86400000)
+      : (plotW * (1 - preFrac)) / Math.max(1, postSpan / 86400000);
+  };
 
   let path = '';
   sim.points.forEach((p, i) => { path += (i === 0 ? 'M' : 'L') + x(p.date).toFixed(1) + ' ' + y(p.stock).toFixed(1) + ' '; });
@@ -7806,30 +7849,39 @@ function renderAmazonImpactSVG(sim) {
   // centering would print the text right over the vertical jump line at
   // that same x. Near the right edge the offset flips so the text doesn't
   // run off the chart. Tightly clustered events (small quantities close in
-  // time) stack progressively higher rather than overlapping.
+  // time) stack progressively higher rather than overlapping. Positions
+  // are computed first (not rendered yet) so the sold-segment labels below
+  // can be checked against them — the two used to be positioned by
+  // entirely separate systems that never compared against each other,
+  // which is exactly what let "Current inventory" collide with a nearby
+  // "▼ X sold" label even though neither system had a bug in isolation.
   const eventPoints = sim.points.filter(p => p.label);
-  const eventLevels = stackLevels(eventPoints.map(p => x(p.date)), 130);
-  const markers = eventPoints.map((p, i) => {
+  const eventLevels = stackLevels(eventPoints.map(p => x(p.date)), 170);
+  const eventLabelPos = eventPoints.map((p, i) => {
     const cx = x(p.date), cy = y(p.stock);
     const color = p.type === 'amazon-before' ? 'var(--status-critical)'
       : p.type === 'production-before' ? 'var(--status-healthy)'
       : p.type === 'oos' ? 'var(--status-critical)'
       : 'var(--ink-soft)';
-    const dy = (p.type === 'oos' ? -16 : -10) - eventLevels[i] * 18;
+    const dy = (p.type === 'oos' ? -16 : -10) - eventLevels[i] * 34;
     const nearRightEdge = cx > (W - padR - 150);
     const anchor = nearRightEdge ? 'end' : 'start';
     const tx = nearRightEdge ? cx - 8 : cx + 8;
-    return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" fill="${color}"/>
-      <text x="${tx.toFixed(1)}" y="${(cy + dy).toFixed(1)}" font-size="10" font-weight="600" text-anchor="${anchor}" fill="${color}">${escapeHtml(p.label)}</text>`;
-  }).join('');
+    return { cx, cy, textY: cy + dy, tx, anchor, color, label: p.label };
+  });
+  const markers = eventLabelPos.map(({ cx, cy, textY, tx, anchor, color, label }) => `
+      <circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" fill="${color}"/>
+      <text x="${tx.toFixed(1)}" y="${textY.toFixed(1)}" font-size="10" font-weight="600" text-anchor="${anchor}" fill="${color}">${escapeHtml(label)}</text>`).join('');
 
   // "▼ X sold (Nd × ads/day)" — placed below the declining segment's
-  // midpoint, stacked lower when two segments land close together. Skipped
-  // entirely for a segment too narrow on screen to fit the text without
-  // it running into its neighbors.
+  // midpoint, stacked lower when two segments land close together, and
+  // pushed further down still if that would land on top of an event label
+  // above (checked against eventLabelPos, not just other sold labels).
+  // Skipped entirely for a segment too narrow on screen to fit the text
+  // without it running into its neighbors.
   const soldMidX = sim.soldSegments.map(s => x(new Date((s.from.getTime() + s.to.getTime()) / 2)));
-  const soldLevels = stackLevels(soldMidX, 140);
-  const soldLabels = sim.soldSegments.filter(s => (s.days * pxPerDay) > 18).map((s) => {
+  const soldLevels = stackLevels(soldMidX, 170);
+  const soldLabels = sim.soldSegments.filter(s => (s.days * pxPerDayAt(s.from)) > 18).map((s) => {
     const i = sim.soldSegments.indexOf(s);
     const midDate = new Date((s.from.getTime() + s.to.getTime()) / 2);
     // Find the segment's start/end stock from the matching points for accurate y placement.
@@ -7839,7 +7891,14 @@ function renderAmazonImpactSVG(sim) {
     const yEnd = endPt ? endPt.stock : Math.max(0, yStart - s.qty);
     const midY = y((yStart + yEnd) / 2);
     const cx = x(midDate);
-    const cy = midY + 22 + soldLevels[i] * 28;
+    let cy = midY + 24 + soldLevels[i] * 34;
+    // Two text lines, ~12px apart, plus a little breathing room either side.
+    const labelHalfHeight = 16;
+    for (let guard = 0; guard < 8; guard++) {
+      const collides = eventLabelPos.some(e => Math.abs(e.cx - cx) < 100 && Math.abs(e.textY - cy) < labelHalfHeight + 18);
+      if (!collides) break;
+      cy += 30;
+    }
     const daysLabel = s.days >= 1 ? Math.round(s.days) : Math.round(s.days * 10) / 10;
     return `<text x="${cx.toFixed(1)}" y="${cy.toFixed(1)}" font-size="10.5" font-style="italic" text-anchor="middle" fill="var(--ink-mute)">▼ ${fmtNum(Math.round(s.qty))} sold</text>
       <text x="${cx.toFixed(1)}" y="${(cy + 12).toFixed(1)}" font-size="10.5" font-style="italic" text-anchor="middle" fill="var(--ink-mute)">(${daysLabel}d × ${fmtNum(Math.round(s.ads))})</text>`;
@@ -7900,6 +7959,35 @@ function toggleAmazonImpactTimeline(sku, forceOpen) {
   }
 }
 
+// Avg Daily Sales tables' per-row toggle — every SKU gets this, not just
+// ones with a pending Amazon shipment. Renders the exact same "health
+// card" used on the Shopify Health Check tab (renderSkuHealthCard), so a
+// SKU with an Amazon shipment gets its full impact/expedite/reorder
+// breakdown here too, not a second, separately-maintained chart. ads is
+// that row's own displayed ADS (passed in so the graph always matches
+// what the row shows), and rowId disambiguates the two ADS tables sharing
+// the same SKU without colliding DOM ids.
+function toggleAdsRowHealthCard(sku, ads, rowId) {
+  const domId = rowId + '-' + skuDomId(sku);
+  const host = document.getElementById('ads-chart-' + domId);
+  const btn = document.getElementById('ads-chart-btn-' + domId);
+  if (!host) return;
+  const isHidden = host.style.display === 'none' || !host.style.display;
+  if (isHidden) {
+    const sim = simulateAmazonImpactTimeline(sku, ads);
+    if (sim) sim.health = classifyAmazonHealthSku(sim);
+    host.innerHTML = sim ? renderSkuHealthCard(sim) : '<div class="wh-empty-section">No data available for this SKU.</div>';
+    host.style.display = 'block';
+    if (btn) btn.textContent = '📉 Hide timeline graph';
+    // Open the graph itself right away instead of making the user click a
+    // second button inside the card that was just revealed.
+    if (sim) toggleAmazonImpactTimeline(sim.sku, true);
+  } else {
+    host.style.display = 'none';
+    if (btn) btn.textContent = '📉 See timeline graph';
+  }
+}
+
 function renderAmazonShopifyImpact() {
   const pendingSkus = new Set((state.toShipAmazon || []).filter(x => !x.shipped && x.sku).map(x => x.sku));
   const rows = Array.from(pendingSkus).map(sku => simulateAmazonImpactTimeline(sku)).filter(Boolean);
@@ -7927,7 +8015,47 @@ function renderAmazonShopifyImpact() {
       return worst(a) - worst(b);
     });
 
-  const rowHTML = (sim) => {
+  const rowHTML = renderSkuHealthCard;
+
+  const triggerDays = getReorderTriggerDays();
+
+  const sectionHTML = (title, icon, list) => list.length === 0 ? '' : `
+    <div class="section-header" style="margin-top:28px;">
+      <h2 class="section-title">${icon} ${title} <span style="color:var(--ink-mute);font-weight:500;">(${list.length})</span></h2>
+    </div>
+    <div class="wh-list">${list.map(rowHTML).join('')}</div>`;
+
+  return `
+    <div class="action-bar">
+      <span class="last-updated">${getLastUpdated()}</span>
+    </div>
+    <div class="page-header">
+      <h1 class="page-title">🛒 Shopify Inventory Health Check After Amazon Shipment</h1>
+      <p class="page-subtitle">For every SKU with a pending Amazon shipment, this simulates stock forward day by day — sales depleting it, production topping it up, each Amazon shipment pulling from it on its own ship date — and shows the Days of Cover left for Shopify right after each shipment goes out, so reorders can be planned around what Amazon actually takes, not just today's stock.</p>
+    </div>
+    ${buildHealthCheckNotificationHTML(reorderNowRows, expediteRows)}
+    <div class="action-bar" style="flex-wrap:wrap;">
+      <label style="font-size:12px;color:var(--ink-soft);display:inline-flex;align-items:center;gap:6px;">
+        Reorder trigger:
+        <input type="number" min="0" value="${triggerDays}" onchange="updateReorderTriggerDays(this.value)"
+               style="width:56px;font-family:inherit;font-size:12px;border:1px solid var(--line);border-radius:4px;padding:4px 6px;">
+        day${triggerDays === 1 ? '' : 's'} of cover once the known pipeline runs out
+      </label>
+    </div>
+    ${sectionHTML('Needs Reorder Now', '🔴', reorderNowRows)}
+    ${sectionHTML('Needs Production Expedited', '⏱', expediteRows)}
+    ${sectionHTML('Healthy', '🟢', healthyRows)}`;
+}
+
+// The full per-SKU "health card" — product name, current stock/ADS, every
+// Amazon shipment's impact (if any), the expedite banner (if a real gap
+// exists), the reorder-by line, and the "see timeline graph" toggle. Used
+// both by the Shopify Health Check tab's own grouped lists AND, for
+// consistency, by the Avg Daily Sales tables' per-row toggle for any SKU
+// with a pending Amazon shipment — see renderAdsRowExpansion(). A SKU with
+// no Amazon holds simply gets no impact rows/expedite banner; the reorder
+// line and chart still work off production alone.
+function renderSkuHealthCard(sim) {
     const id = skuDomId(sim.sku);
     const impactRows = sim.amazonImpacts.map((imp, idx) => {
       const status = imp.shortfall > 0 ? 'critical' : (imp.daysOfCoverAfter <= REORDER_DAYS ? 'reorder' : 'healthy');
@@ -7971,9 +8099,11 @@ function renderAmazonShopifyImpact() {
     }
 
     // Expedite tier gets a prominent header line naming the exact delivery
-    // to speed up and the date it needs to land by to close the gap.
+    // to speed up and the date it needs to land by to close the gap. Only
+    // ever set for SKUs with a pending Amazon shipment — sim.health is
+    // undefined for a plain SKU rendered via the Avg Daily Sales tables.
     let expediteHeader = '';
-    if (sim.health.tier === 'expedite') {
+    if (sim.health && sim.health.tier === 'expedite') {
       const neededByLabel = sim.health.neededBy.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
       const arrivesOnLabel = sim.health.arrivesOn.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
       expediteHeader = `<div style="background:var(--status-reorder-bg);color:#8A6D16;border-radius:6px;padding:8px 10px;font-size:12.5px;font-weight:600;">
@@ -7993,43 +8123,13 @@ function renderAmazonShopifyImpact() {
           </div>
         </div>
         ${expediteHeader}
-        <div>${impactRows}</div>
+        ${impactRows ? `<div>${impactRows}</div>` : ''}
         ${reorderLine}
         <div>
           <button id="amz-impact-btn-${id}" class="btn btn-ghost" style="font-size:11px;" onclick="toggleAmazonImpactTimeline('${escapeAttr(sim.sku)}')">📉 See delivery timeline graph</button>
           <div id="amz-impact-chart-${id}" style="display:none;margin-top:12px;padding:14px 6px 4px;border:1px solid var(--line);border-radius:var(--radius);"></div>
         </div>
       </div>`;
-  };
-
-  const triggerDays = getReorderTriggerDays();
-
-  const sectionHTML = (title, icon, list) => list.length === 0 ? '' : `
-    <div class="section-header" style="margin-top:28px;">
-      <h2 class="section-title">${icon} ${title} <span style="color:var(--ink-mute);font-weight:500;">(${list.length})</span></h2>
-    </div>
-    <div class="wh-list">${list.map(rowHTML).join('')}</div>`;
-
-  return `
-    <div class="action-bar">
-      <span class="last-updated">${getLastUpdated()}</span>
-    </div>
-    <div class="page-header">
-      <h1 class="page-title">🛒 Shopify Inventory Health Check After Amazon Shipment</h1>
-      <p class="page-subtitle">For every SKU with a pending Amazon shipment, this simulates stock forward day by day — sales depleting it, production topping it up, each Amazon shipment pulling from it on its own ship date — and shows the Days of Cover left for Shopify right after each shipment goes out, so reorders can be planned around what Amazon actually takes, not just today's stock.</p>
-    </div>
-    ${buildHealthCheckNotificationHTML(reorderNowRows, expediteRows)}
-    <div class="action-bar" style="flex-wrap:wrap;">
-      <label style="font-size:12px;color:var(--ink-soft);display:inline-flex;align-items:center;gap:6px;">
-        Reorder trigger:
-        <input type="number" min="0" value="${triggerDays}" onchange="updateReorderTriggerDays(this.value)"
-               style="width:56px;font-family:inherit;font-size:12px;border:1px solid var(--line);border-radius:4px;padding:4px 6px;">
-        day${triggerDays === 1 ? '' : 's'} of cover once the known pipeline runs out
-      </label>
-    </div>
-    ${sectionHTML('Needs Reorder Now', '🔴', reorderNowRows)}
-    ${sectionHTML('Needs Production Expedited', '⏱', expediteRows)}
-    ${sectionHTML('Healthy', '🟢', healthyRows)}`;
 }
 
 // Dropdown notification banner for this tab — same component/classes as
@@ -11290,14 +11390,23 @@ function renderSales() {
         const isLow = daysImmediate < REORDER_DAYS;
         docCell = `<td class="doc-cell ${isLow ? 'doc-low' : ''}" data-label="Days of Cover" title="${fmtNum(stock)} units in stock${prodQty > 0 ? ' · ' + fmtNum(prodQty) + ' in production' : ''} · ${ads.toFixed(1)} ADS">${renderDaysOfCoverBlock(daysImmediate, daysTotal, prodQty, prodEntry.soonestPromise, prodEntry.batches, ads, stock)}</td>`;
       }
+      const chartDomId = 'sales-' + skuDomId(skuKey);
       return `
         <tr>
-          <td class="product-cell" data-label="Product">${escapeHtml(s.name)}${renderSkuFamilyTags(s.sku)}</td>
+          <td class="product-cell" data-label="Product">
+            ${escapeHtml(s.name)}${renderSkuFamilyTags(s.sku)}
+            <button id="ads-chart-btn-${chartDomId}" class="btn btn-ghost" style="font-size:10.5px;margin-top:4px;display:block;" onclick="toggleAdsRowHealthCard('${escapeAttr(skuKey)}', ${ads}, 'sales')">📉 See timeline graph</button>
+          </td>
           ${cells}
           <td class="numeric ads-cell" data-label="ADS ${viewDays}d"><strong>${ads.toFixed(1)}</strong></td>
           ${docCell}
           <td data-label="">
             <button class="row-delete" onclick="deleteSalesRow('${escapeAttr(s.sku)}')" title="Remove this SKU from sales">${trashIconSVG()}</button>
+          </td>
+        </tr>
+        <tr class="ads-chart-row">
+          <td colspan="99" style="padding:0;">
+            <div id="ads-chart-${chartDomId}" style="display:none;margin:6px 12px 14px;"></div>
           </td>
         </tr>`;
     }).join('');
@@ -11518,9 +11627,13 @@ function renderSalesAmazon() {
         const isLow = daysImmediate < REORDER_DAYS;
         docCell = `<td class="doc-cell ${isLow ? 'doc-low' : ''}" data-label="Days of Cover" title="${fmtNum(stock)} units in stock${prodQty > 0 ? ' · ' + fmtNum(prodQty) + ' in production' : ''} · ${ads.toFixed(1)} normal ADS + ${amazonProjection.toFixed(1)} Amazon projection = ${adsWithAmazon.toFixed(1)} combined ADS">${renderDaysOfCoverBlock(daysImmediate, daysTotal, prodQty, prodEntry.soonestPromise, prodEntry.batches, adsWithAmazon, stock)}</td>`;
       }
+      const chartDomId = 'salesamz-' + skuDomId(skuKey);
       return `
         <tr>
-          <td class="product-cell" data-label="Product">${escapeHtml(s.name)}${renderSkuFamilyTags(s.sku)}</td>
+          <td class="product-cell" data-label="Product">
+            ${escapeHtml(s.name)}${renderSkuFamilyTags(s.sku)}
+            <button id="ads-chart-btn-${chartDomId}" class="btn btn-ghost" style="font-size:10.5px;margin-top:4px;display:block;" onclick="toggleAdsRowHealthCard('${escapeAttr(skuKey)}', ${adsWithAmazon}, 'salesamz')">📉 See timeline graph</button>
+          </td>
           ${cells}
           <td class="numeric ads-plain-cell" data-label="ADS ${viewDays}d">${ads.toFixed(1)}</td>
           <td class="numeric amazon-proj-cell" data-label="Amazon Projection (25%)" title="25% of normal ADS — a placeholder estimate for future Amazon sales">${amazonProjection.toFixed(1)}</td>
@@ -11528,6 +11641,11 @@ function renderSalesAmazon() {
           ${docCell}
           <td data-label="">
             <button class="row-delete" onclick="deleteSalesRow('${escapeAttr(s.sku)}')" title="Remove this SKU from sales">${trashIconSVG()}</button>
+          </td>
+        </tr>
+        <tr class="ads-chart-row">
+          <td colspan="99" style="padding:0;">
+            <div id="ads-chart-${chartDomId}" style="display:none;margin:6px 12px 14px;"></div>
           </td>
         </tr>`;
     }).join('');
